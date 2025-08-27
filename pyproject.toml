@@ -1,0 +1,46 @@
+[project]
+name = "precond_npe_misspec"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "equinox>=0.13.0",
+    "jax>=0.7.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.13,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.17.1",
+    "pre-commit>=4.3.0",
+    "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
+    "ruff>=0.12.10",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E","F","I","B","UP"]        # pycodestyle/pyflakes/isort/bugbear/pyupgrade
+# Add "N","D" if you want naming/docstring rules
+
+[tool.ruff.lint.per-file-ignores]
+"src/**/__init__.py" = ["F401"]        # re-exports allowed
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_any_generics = true
+# JAX/Equinox are typed, but submodules may lag; relax per‑module if needed:
+# [[tool.mypy.overrides]]
+# module = ["jax.*","equinox.*"]
+# ignore_missing_imports = true
+
