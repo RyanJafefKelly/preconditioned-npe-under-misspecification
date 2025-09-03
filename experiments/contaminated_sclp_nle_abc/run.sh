@@ -20,12 +20,12 @@ fi
 
 : "${NUM_DRAWS:=5}"
 : "${MISSPEC_LEVEL:=1.0}"
-: "${N_TRAIN:=5000}"
-: "${N_PROPS:=500000}"
-: "${Q_ACCEPT:=0.05}"
-: "${DISTANCE:=euclidean}"   # euclidean|l1|mahalanobis|mmd
+: "${N_TRAIN:=50000}"
+: "${N_PROPS:=1000000}"
+: "${Q_ACCEPT:=0.001}"
+: "${DISTANCE:=mmd}"   # euclidean|l1|mahalanobis|mmd
 : "${MAHALANOBIS_RIDGE:=1e-3}"
-: "${N_REP_SUMMARIES:=1}"    # set >1 for mmd
+: "${N_REP_SUMMARIES:=20}"    # set >1 for mmd
 : "${MMD_BANDWIDTH:=}"       # empty -> median heuristic
 : "${MMD_UNBIASED:=0}"
 

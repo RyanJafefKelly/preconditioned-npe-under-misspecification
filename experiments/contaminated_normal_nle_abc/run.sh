@@ -11,9 +11,9 @@ mkdir -p "$OUTDIR"
 : "${THETA:=2.0}"
 : "${STDEV_ERR:=2.0}"
 : "${N_OBS:=100}"
-: "${N_TRAIN:=4000}"
-: "${N_PROPS:=200_000}"
-: "${Q_ACCEPT:=0.01}"
+: "${N_TRAIN:=5000}"
+: "${N_PROPS:=400_000}"
+: "${Q_ACCEPT:=0.005}"
 
 CMD="uv run python -m precond_npe_misspec.pipelines.contaminated_normal_nle_abc \
   --seed ${SEED} --theta_true ${THETA} --stdev_err ${STDEV_ERR} \
