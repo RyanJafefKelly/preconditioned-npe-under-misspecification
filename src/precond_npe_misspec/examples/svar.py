@@ -12,7 +12,7 @@ def default_pairs(k: int = 6) -> jnp.ndarray:
 
 
 def prior_sample(key: Array, pairs: Array | None = None) -> jnp.ndarray:
-    """θ ~ Uniform([-1,1]^{2m}) × Uniform([0,1]) for σ."""
+    """theta ~ Uniform([-1,1]^6) × Uniform([0,1]) for sigma."""
     pairs = default_pairs() if pairs is None else pairs
     m = pairs.shape[0]
     k1, k2 = jax.random.split(key)
@@ -21,10 +21,8 @@ def prior_sample(key: Array, pairs: Array | None = None) -> jnp.ndarray:
     return jnp.concatenate([off, jnp.array([sigma])])
 
 
-def _theta_to_X(
-    theta: jnp.ndarray, k: int, pairs: Array
-) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Map θ -> (X, σ). σ is a JAX scalar."""
+def _theta_to_X(theta: jnp.ndarray, k: int, pairs: Array) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Map theta -> (X, sigma). sigma is a JAX scalar."""
     m = pairs.shape[0]
     dtype = theta.dtype
     X = (-0.1) * jnp.eye(k, dtype=dtype)
@@ -35,11 +33,11 @@ def _theta_to_X(
     X = X.at[i, j].set(fwd)
     X = X.at[j, i].set(rev)
 
-    sigma = jnp.asarray(theta[-1], dtype=dtype)  # JAX scalar, no Python float
+    sigma = jnp.asarray(theta[-1], dtype=dtype)
     return X, sigma
 
 
-def true_dgp(
+def assumed_dgp(
     key: Array,
     theta: jnp.ndarray,
     k: int = 6,
@@ -48,7 +46,7 @@ def true_dgp(
 ) -> jnp.ndarray:
     """SVAR: y_t = X y_{t-1} + ε_t, ε_t ~ N(0, σ^2 I_k). Returns Y shape (T,k)."""
     pairs = default_pairs() if pairs is None else pairs
-    X, sigma = _theta_to_X(theta, k, pairs)  # sigma is JAX scalar
+    X, sigma = _theta_to_X(theta, k, pairs)
     k0, k_draws = jax.random.split(key)
     y0 = sigma * jax.random.normal(k0, (k,), dtype=theta.dtype)
 
@@ -62,9 +60,28 @@ def true_dgp(
     return jnp.vstack([y0[None, :], ys])
 
 
-assumed_dgp = (
-    true_dgp  # same model in this example  # TODO! CHANGE FOR MISSPECIFICATION
-)
+# TODO! SOME MORE THOUGHT ON HOW TO MISSPECIFY
+def true_dgp(
+    key: Array,
+    theta: jnp.ndarray,
+    k: int = 6,
+    T: int = 1000,
+    pairs: Array | None = None,
+    eps: float = 0.02,  # fraction of contaminated time points
+    kappa: float = 12.0,  # outlier scale multiplier
+    df: float = 1.0,  # heavy tail (df=1 ⇒ Cauchy-like)
+    per_channel: bool = True,  # contam each channel independently at a contaminated t
+) -> jnp.ndarray:
+    """Clean AR(1) then add mean-zero heavy-tailed spikes to a small fraction of rows."""
+    Y = assumed_dgp(key, theta, k=k, T=T, pairs=pairs)  # clean SVAR
+    # sigma = jnp.asarray(theta[-1], dtype=Y.dtype)
+
+    # k_mask, k_eps = jax.random.split(jax.random.fold_in(key, 2024))
+    # contam = jax.random.bernoulli(k_mask, eps, (T,))  # (T,)
+    # e_t = kappa * sigma * _student_t_noise(k_eps, df, (T, 1))  # shared across channels
+
+    # misspecify mean. # TODO: more interesting misspecification?
+    return Y + 1
 
 
 def summaries(Y: jnp.ndarray, pairs: Array | None = None) -> jnp.ndarray:
@@ -75,4 +92,5 @@ def summaries(Y: jnp.ndarray, pairs: Array | None = None) -> jnp.ndarray:
     B = Y[1:, pairs[:, 1]] * Y[:-1, pairs[:, 0]]  # shape (T-1, m)
     sdir = jnp.concatenate([A.sum(0), B.sum(0)]) / T  # use 1/T as in the paper
     s_sigma = jnp.std(Y.reshape(-1), ddof=0)
-    return jnp.concatenate([sdir, jnp.array([s_sigma])])
+    Y_mean = jnp.mean(Y)
+    return jnp.concatenate([sdir, jnp.array([s_sigma]), jnp.array([Y_mean])])
