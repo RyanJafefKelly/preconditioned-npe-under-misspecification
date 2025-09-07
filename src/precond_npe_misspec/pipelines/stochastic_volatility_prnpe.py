@@ -8,12 +8,8 @@ from typing import Literal
 import jax
 import jax.numpy as jnp
 
-from precond_npe_misspec.examples.stochastic_volatility import (
-    assumed_dgp as sv_assumed_dgp,
-)
-from precond_npe_misspec.examples.stochastic_volatility import (
-    prior_sample as sv_prior_sample,
-)
+from precond_npe_misspec.examples.stochastic_volatility import assumed_dgp as sv_assumed_dgp
+from precond_npe_misspec.examples.stochastic_volatility import prior_sample as sv_prior_sample
 from precond_npe_misspec.examples.stochastic_volatility import summaries as sv_summaries
 from precond_npe_misspec.examples.stochastic_volatility import true_dgp as sv_true_dgp
 from precond_npe_misspec.pipelines.base_pnpe import (

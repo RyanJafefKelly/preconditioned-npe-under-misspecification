@@ -302,7 +302,14 @@ def npe_step(
         batch_size=flow_cfg.batch_size,
         show_progress=True,
     )
-    posterior_flow = Transformed(flow_fit, bij.Invert(bij.Affine(-th_mean / th_std, 1.0 / th_std)))
+    affine_bij = bij.Affine(-th_mean / th_std, 1.0 / th_std)
+    invert_bij = bij.Invert(bijection=affine_bij, shape=th_mean.shape, cond_shape=None)
+    posterior_flow = Transformed(
+        base_dist=flow_fit,
+        bijection=invert_bij,
+        shape=th_mean.shape,
+        cond_shape=S_mean.shape,
+    )
     return _PosteriorTrained(posterior_flow, S_mean, S_std, th_mean, th_std)
 
 

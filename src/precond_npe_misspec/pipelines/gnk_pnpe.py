@@ -24,11 +24,11 @@ type Array = jax.Array
 class Config:
     # Data‑generating setup
     seed: int = 0
-    # θ = (A, B, g, k)
+    # model params: (A, B, g, k)
     theta_true: tuple[float, float, float, float] = (3.0, 1.0, 2.0, 0.5)
     n_obs: int = 100
 
-    # Preconditioning (ABC)
+    # Preconditioning (here rejection ABC step)
     n_sims: int = 25_000
     q_precond: float = 0.2
 
@@ -44,7 +44,10 @@ class Config:
     max_epochs: int = 500
     max_patience: int = 10
     batch_size: int = 512
+
+    # Distance options
     distance: Literal["euclidean", "l1", "mmd"] = "euclidean"
+    # NOTE: additional MMD options?
 
     # Summaries: choose quantiles set
     summaries: Literal["octile", "duodecile", "hexadeciles"] = "octile"
@@ -63,9 +66,6 @@ class Config:
     outdir: str = ""
 
 
-# ---------------- GNK helpers ----------------
-
-
 def _prior_sample_factory(cfg: Config) -> Callable[[Array], jnp.ndarray]:
     lo = jnp.array([cfg.A_min, cfg.B_min, cfg.g_min, cfg.k_min])
     hi = jnp.array([cfg.A_max, cfg.B_max, cfg.g_max, cfg.k_max])
@@ -82,9 +82,6 @@ def simulate_gnk(key: Array, theta: jnp.ndarray, *, n_obs: int) -> jnp.ndarray:
     z = jax.random.normal(key, (n_obs,), dtype=theta.dtype)
     A, B, g, k = theta
     return gnk(z, A, B, g, k)
-
-
-# ---------------- Main ----------------
 
 
 def main(cfg: Config) -> None:
