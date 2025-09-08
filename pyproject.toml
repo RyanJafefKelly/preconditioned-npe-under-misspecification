@@ -1,7 +1,7 @@
 [project]
 name = "precond_npe_misspec"
 version = "0.1.0"
-description = "Add your description here"
+description = "TODO: ADD DESCRIPTION"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -45,8 +45,8 @@ strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 disallow_any_generics = true
-# JAX/Equinox are typed, but submodules may lag; relax per‑module if needed:
-# [[tool.mypy.overrides]]
-# module = ["jax.*","equinox.*"]
-# ignore_missing_imports = true
+disable_error_code = ["import-untyped"]  # hide the note about missing stubs
 
+[[tool.mypy.overrides]]
+module = ["numpyro", "numpyro.*"]
+ignore_missing_imports = true
