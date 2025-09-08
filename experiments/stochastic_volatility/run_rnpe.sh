@@ -4,14 +4,14 @@ set -euo pipefail
 export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 
 DATE=$(date +"%Y%m%d-%H%M%S")
-OUTDIR="results/stochastic_volatility/pnpe/${DATE}"
+OUTDIR="results/stochastic_volatility/rnpe/${DATE}"
 mkdir -p "$OUTDIR"
 
 : "${SEED:=0}"
 : "${T:=100}"
 
-# θ is 2D: (sigma_rw, nu). Space‑separated ASCII numbers only. No quotes.
-THETA_DEFAULT="0.001 10.0"
+# θ is 2D: (sigma_rw, nu)
+THETA_DEFAULT="0.02 10.0"
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
 if (( ${#THETA_ARR[@]} != 2 )); then
@@ -19,14 +19,14 @@ if (( ${#THETA_ARR[@]} != 2 )); then
   exit 1
 fi
 
-# Misspecification block scaling (applies to observed data only)
-: "${SIGMA_MS:=2}"        # 0=no misspecification; else scale by 5**SIGMA_MS within block
-: "${BLOCK_START:=50}"    # 1‑indexed inclusive
-: "${BLOCK_END:=65}"      # 1‑indexed inclusive
+# Misspecification for observed data
+: "${SIGMA_MS:=5}"
+: "${BLOCK_START:=50}"
+: "${BLOCK_END:=65}"
 
-# Preconditioning ABC
+# ABC preconditioning
 : "${N_SIMS:=20000}"
-: "${Q_PRECOND:=0.2}"
+: "${Q_PRECOND:=1.0}"
 
 # Posterior sampling
 : "${N_POSTERIOR_DRAWS:=20000}"
@@ -46,7 +46,13 @@ fi
 : "${MMD_UNBIASED:=0}"
 : "${MMD_BANDWIDTH:=}"       # empty -> median heuristic
 
-cmd=(uv run python -m precond_npe_misspec.pipelines.stochastic_volatility_pnpe
+# RNPE denoiser
+: "${DENOISE_MODEL:=spike_slab}"   # student_t|cauchy|spike_slab
+: "${MCMC_NUM_WARMUP:=1000}"
+: "${MCMC_NUM_SAMPLES:=2000}"
+: "${MCMC_THINNING:=1}"
+
+cmd=(uv run python -m precond_npe_misspec.pipelines.stochastic_volatility_prnpe
   --seed "$SEED"
   --outdir "$OUTDIR"
   --theta_true "${THETA_ARR[@]}"
@@ -66,6 +72,10 @@ cmd=(uv run python -m precond_npe_misspec.pipelines.stochastic_volatility_pnpe
   --max_patience "$MAX_PATIENCE"
   --batch_size "$BATCH_SIZE"
   --distance "$DISTANCE"
+  --denoise_model "$DENOISE_MODEL"
+  --mcmc_num_warmup "$MCMC_NUM_WARMUP"
+  --mcmc_num_samples "$MCMC_NUM_SAMPLES"
+  --mcmc_thinning "$MCMC_THINNING"
 )
 
 [[ -n "$MMD_BANDWIDTH" ]] && cmd+=(--mmd_bandwidth "$MMD_BANDWIDTH")

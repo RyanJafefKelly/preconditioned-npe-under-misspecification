@@ -4,14 +4,14 @@ set -euo pipefail
 export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 
 DATE=$(date +"%Y%m%d-%H%M%S")
-OUTDIR="results/stochastic_volatility/pnpe/${DATE}"
+OUTDIR="results/stochastic_volatility/npe/${DATE}"
 mkdir -p "$OUTDIR"
 
 : "${SEED:=0}"
 : "${T:=100}"
 
 # θ is 2D: (sigma_rw, nu). Space‑separated ASCII numbers only. No quotes.
-THETA_DEFAULT="0.001 10.0"
+THETA_DEFAULT="0.02 10.0"
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
 if (( ${#THETA_ARR[@]} != 2 )); then
@@ -20,13 +20,13 @@ if (( ${#THETA_ARR[@]} != 2 )); then
 fi
 
 # Misspecification block scaling (applies to observed data only)
-: "${SIGMA_MS:=2}"        # 0=no misspecification; else scale by 5**SIGMA_MS within block
+: "${SIGMA_MS:=5}"        # 0=no misspecification; else scale by 5**SIGMA_MS within block
 : "${BLOCK_START:=50}"    # 1‑indexed inclusive
 : "${BLOCK_END:=65}"      # 1‑indexed inclusive
 
 # Preconditioning ABC
 : "${N_SIMS:=20000}"
-: "${Q_PRECOND:=0.2}"
+: "${Q_PRECOND:=1.0}"
 
 # Posterior sampling
 : "${N_POSTERIOR_DRAWS:=20000}"
