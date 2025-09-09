@@ -11,7 +11,7 @@ import jax.numpy as jnp
 
 from precond_npe_misspec.examples.gnk import gnk as gnk_quantile
 from precond_npe_misspec.examples.gnk import (
-    ss_robust,  # ss_octile,
+    ss_octile,
     true_dgp,  # added earlier
 )
 from precond_npe_misspec.pipelines.base_pnpe import (
@@ -123,7 +123,7 @@ class Config:
 
 
 def main(cfg: Config) -> None:
-    s_dim = 4  # NOTE: Manually set for octile summaries
+    s_dim = 7  # NOTE: Manually set for octile summaries
     theta_dim = 4
 
     # Flow training hyperparams
@@ -161,7 +161,7 @@ def main(cfg: Config) -> None:
         prior_sample=prior_sample,
         true_dgp=lambda key, _, **kw: true_dgp(key, n_obs=cfg.n_obs),  # well‑specified
         simulate=lambda key, theta, **kw: _simulate_gnk(key, theta, n_obs=cfg.n_obs),
-        summaries=lambda y: ss_robust(y),  # y is (n_obs,)
+        summaries=lambda y: ss_octile(y),  # y is (n_obs,)
         # build_theta_flow=lambda key, fc: coupling_flow(  #
         #     key=key,
         #     base_dist=Normal(jnp.zeros(theta_dim)),
