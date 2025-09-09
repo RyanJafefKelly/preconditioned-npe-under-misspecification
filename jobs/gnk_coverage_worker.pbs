@@ -4,10 +4,10 @@
 #PBS -l mem=8GB
 #PBS -l ncpus=1
 #PBS -j oe
-cd "$PBS_O_WORKDIR" || exit 1
-set -euo pipefail
 
-# -------- config from qsub -v (see launcher) --------
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+
 R=${R:-100}                                      # replicates
 METHODS_STR=${METHODS_STR:-"npe rnpe pnpe prnpe"}
 OBS_SEED_OFFSET=${OBS_SEED_OFFSET:-1234}
@@ -18,6 +18,14 @@ N_SIMS=${N_SIMS:-20000}
 Q_PRECOND=${Q_PRECOND:-0.2}
 N_POST=${N_POST:-20000}
 LEVEL=${LEVEL:-0.95}
+
+export PATH="$HOME/.local/bin:$PATH"
+export UV_CACHE_DIR="${SCRATCH:-$HOME}/.cache/uv"
+export UV_PROJECT_ENVIRONMENT="$PBS_O_WORKDIR/.venv"
+
+echo "[env] host=$(hostname) jobid=${PBS_JOBID} idx=${PBS_ARRAY_INDEX:-na}"
+which uv || { echo "uv missing"; exit 127; }
+
 
 # -------- derive (replicate, method) from array index --------
 IDX=${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-0}}        # PBS Pro / Torque
