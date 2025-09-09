@@ -10,7 +10,7 @@ type Array = jax.Array
 
 
 # model params = (sigma_rw, nu)
-def prior_sample_exp(key: Array) -> jnp.ndarray:
+def prior_sample(key: Array) -> jnp.ndarray:
     """sigma_rw ~ Exp(50),  nu ~ Exp(0.1). Returns θ shape (2,)."""
     k1, k2 = jax.random.split(key)
     sigma_rw = jax.random.exponential(k1) / 50.0  # mean 0.02
@@ -18,14 +18,14 @@ def prior_sample_exp(key: Array) -> jnp.ndarray:
     return jnp.array([sigma_rw, nu])
 
 
-def prior_sample(key: Array) -> jnp.ndarray:
-    """sigma_rw ~ Exp(50),  nu ~ Exp(0.1). Returns θ shape (2,)."""
-    k1, k2 = jax.random.split(key)
-    # sigma_rw = jax.random.gamma(k1, 5)
-    # nu = jax.random.gamma(k2, 5)  # mean 10.0
-    sigma_rw = dist.Gamma(5, 25).sample(k1)
-    nu = dist.Gamma(5, 1).sample(k2)
-    return jnp.array([sigma_rw, nu])
+# def prior_sample(key: Array) -> jnp.ndarray:
+#     """sigma_rw ~ Exp(50),  nu ~ Exp(0.1). Returns θ shape (2,)."""
+#     k1, k2 = jax.random.split(key)
+#     # sigma_rw = jax.random.gamma(k1, 5)
+#     # nu = jax.random.gamma(k2, 5)  # mean 10.0
+#     sigma_rw = dist.Gamma(5, 25).sample(k1)
+#     nu = dist.Gamma(5, 1).sample(k2)
+#     return jnp.array([sigma_rw, nu])
 
 
 def assumed_dgp(key: Array, theta: jnp.ndarray, T: int = 100) -> Any:
@@ -100,11 +100,15 @@ def _acf_x2(x: jnp.ndarray, lags: jnp.ndarray) -> jnp.ndarray:
     return acf_full[lags].astype(x.dtype)
 
 
+# def summaries(x: jnp.ndarray, lags: tuple[int, ...] = (1, 2, 3, 4, 5)) -> jnp.ndarray:
+#     # first compute full summaries
+#     full_s_x = full_summaries(x, lags=lags)
+#     subset_idx = [0, 1, 3, 6]
+#     return full_s_x[jnp.array(subset_idx, dtype=jnp.int32)]
+
+
 def summaries(x: jnp.ndarray, lags: tuple[int, ...] = (1, 2, 3, 4, 5)) -> jnp.ndarray:
-    # first compute full summaries
-    full_s_x = full_summaries(x, lags=lags)
-    subset_idx = [0, 1, 3, 6]
-    return full_s_x[jnp.array(subset_idx, dtype=jnp.int32)]
+    return x
 
 
 def full_summaries(x: jnp.ndarray, lags: tuple[int, ...] = (2, 3, 4, 5)) -> jnp.ndarray:
