@@ -1,0 +1,17 @@
+#!/bin/bash -l
+#PBS -N gnk_backfill_and_collate
+#PBS -l walltime=00:10:00
+#PBS -l mem=2GB
+#PBS -l ncpus=1
+#PBS -j oe
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+export PATH="$HOME/.local/bin:$PATH"
+cd "$PBS_O_WORKDIR"
+./.venv/bin/python scripts/backfill_and_collate.py \
+  --results-root results/gnk \
+  --theta-target 2.3663 4.1757 1.7850 0.1001 \
+  --methods npe rnpe pnpe prnpe \
+  --filter-n-obs 5000 \
+  --filter-n-sims 20000 \
+  --level 0.95
