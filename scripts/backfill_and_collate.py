@@ -99,9 +99,29 @@ def main(a: Args) -> None:
     th = np.asarray(a.theta_target, dtype=np.float64)
 
     # 1) Backfill metrics.json where missing
+    candidates: dict[Path, str] = {}
+    for p in root.rglob("posterior_samples_robust.npz"):
+        candidates[p.parent] = p.name
+    for p in root.rglob("posterior_samples.npz"):
+        candidates.setdefault(p.parent, p.name)  # only if robust not present
+
+    # select latest timestamp dir per (method, group, seed)
+    selected: dict[tuple[str, str, str], Path] = {}
+    for d in candidates.keys():
+        parts = d.parts
+        i = parts.index("gnk")  # results/gnk/<method>/<group>/seed-XX/<DATE>
+        method = parts[i + 1]
+        group = parts[i + 2]
+        seed_dir = parts[i + 3]  # e.g. 'seed-61'
+        key = (method, group, seed_dir)
+        # keep latest DATE lexicographically (YYYYMMDD-HHMMSS)
+        if key not in selected or d.name > selected[key].name:
+            selected[key] = d
+
+    run_dirs = list(selected.values())
+
     metrics_paths: list[Path] = []
-    for p in root.rglob("posterior_samples*.npz"):
-        d = p.parent
+    for d in run_dirs:
         mpath = d / "metrics.json"
         if not mpath.exists():
             sam = _samples_in(d)
