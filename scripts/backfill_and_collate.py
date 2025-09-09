@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass  # add this import
 from pathlib import Path
 
 import numpy as np
@@ -55,7 +56,7 @@ def np_compute_rep_metrics(samples: np.ndarray, theta_target: np.ndarray, level:
     }
 
 
-# ---------- Backfill + Collate ----------
+@dataclass
 class Args:
     results_root: str = "results/gnk"
     theta_target: tuple[float, float, float, float] = (2.3663, 4.1757, 1.7850, 0.1001)
