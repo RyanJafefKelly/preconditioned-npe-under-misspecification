@@ -27,7 +27,7 @@ JOBID=$(qsub ${PBS_ARRAY_FLAG} 0-$((TOT-1)) \
   -l walltime=00:20:00,mem=8GB,ncpus=1 \
   -v R="$R",METHODS_STR="$METHODS_STR",OBS_SEED_OFFSET="$OBS_SEED_OFFSET",\
 THETA_TRUE="$THETA_TRUE",THETA_DAGGER="$THETA_DAGGER",N_OBS="$N_OBS",\
-N_SIMS="$N_SIMS",Q_PRECOND="$Q_PRECOND",N_POST="$N_POST",LEVEL="$LEVEL" \
+N_SIMS="$N_SIMS",N_POST="$N_POST",LEVEL="$LEVEL" \
   jobs/gnk_coverage_worker.pbs | tr -d '[:space:]')
 JOBBASE="${JOBID%%.*}"; DEP_ID="${JOBBASE%%[*}"
 
