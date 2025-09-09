@@ -73,3 +73,19 @@ printf '%q ' "${cmd[@]}" | tee "${OUTDIR}/cmd.txt"
 echo
 env | sort > "${OUTDIR}/env.txt"
 "${cmd[@]}" 2>&1 | tee "${OUTDIR}/stdout.log"
+
+THETA_DEFAULT="3.0 1.0 2.0 0.5"        # (A, B, g, k)
+THETA="${THETA:-$THETA_DEFAULT}"
+
+THETA_TARGET_DEFAULT="2.3663 4.1757 1.7850 0.1001"
+THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"
+THETA_TARGET="${THETA_TARGET//,/}"              # remove any commas
+read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET" # into array: 4 tokens
+
+uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
+  --outdir "$OUTDIR" \
+  --theta-target "${THETA_TARGET_ARR[@]}" \
+  --level 0.95 \
+  --want-hpdi \
+  --want-central \
+  --method PNPE
