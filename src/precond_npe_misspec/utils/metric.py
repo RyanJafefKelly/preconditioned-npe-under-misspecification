@@ -1,0 +1,97 @@
+# src/precond_npe_misspec/utils/metrics.py
+from __future__ import annotations
+
+from typing import Any
+
+import jax
+import jax.numpy as jnp
+
+type Array = jax.Array
+
+
+def _ensure_2d(x: Array) -> Array:
+    x = jnp.asarray(x)
+    return x if x.ndim == 2 else x.reshape((-1, 1))
+
+
+def central_ci(samples: Array, alpha: float = 0.05) -> tuple[Array, Array]:
+    """Quantile CI per dimension. samples: (K,D). Returns lo, hi shape (D,)."""
+    s = _ensure_2d(samples)
+    lo, hi = jnp.quantile(s, jnp.array([alpha / 2, 1.0 - alpha / 2]), axis=0, method="linear")
+    return lo, hi
+
+
+def _hpdi_1d(x: Array, alpha: float) -> tuple[Array, Array]:
+    xs = jnp.sort(x)
+    n = xs.size
+    m = jnp.int32(jnp.ceil((1.0 - alpha) * n))
+    starts, ends = xs[: n - m + 1], xs[m - 1 :]
+    i = jnp.argmin(ends - starts)
+    return starts[i], ends[i]
+
+
+def hpdi(samples: Array, alpha: float = 0.05) -> tuple[Array, Array]:
+    """Minimum‑width HPDI per dimension from samples. Returns lo, hi shape (D,)."""
+    s = _ensure_2d(samples)
+    lo, hi = jax.vmap(lambda col: _hpdi_1d(col, alpha), in_axes=1, out_axes=(0, 0))(s)
+    return lo, hi
+
+
+def covered(lo: Array, hi: Array, theta: Array) -> Array:
+    """Elementwise hit flags; all inputs broadcast to (D,)."""
+    return (jnp.asarray(theta) >= jnp.asarray(lo)) & (jnp.asarray(theta) <= jnp.asarray(hi))
+
+
+def compute_rep_metrics(
+    posterior_samples: Array,
+    theta_target: Array,
+    *,
+    level: float = 0.95,
+    want_central: bool = True,
+    want_hpdi: bool = True,
+    # Optional joint HPD check (log‑density threshold)
+    logpdf_samples: Array | None = None,  # shape (K,)
+    logpdf_at_theta: float | None = None,
+) -> dict[str, Any]:
+    """
+    Returns a JSON‑friendly dict with per‑dim intervals, widths, and hit flags.
+    Keys (when available): ci_central, width_central, hit_central, ci_hpdi, width_hpdi, hit_hpdi,
+    n_post, level, joint_hpd_hit.
+    """
+    alpha = 1.0 - level
+    out: dict[str, Any] = {
+        "n_post": int(_ensure_2d(posterior_samples).shape[0]),
+        "level": float(level),
+    }
+    th = jnp.asarray(theta_target)
+
+    if want_central:
+        lo, hi = central_ci(posterior_samples, alpha)
+        out["ci_central"] = {"lo": lo.tolist(), "hi": hi.tolist()}
+        out["width_central"] = (hi - lo).tolist()
+        out["hit_central"] = covered(lo, hi, th).tolist()
+
+    if want_hpdi:
+        lo, hi = hpdi(posterior_samples, alpha)
+        out["ci_hpdi"] = {"lo": lo.tolist(), "hi": hi.tolist()}
+        out["width_hpdi"] = (hi - lo).tolist()
+        out["hit_hpdi"] = covered(lo, hi, th).tolist()
+
+    if (logpdf_samples is not None) and (logpdf_at_theta is not None):
+        t = jnp.quantile(jnp.asarray(logpdf_samples), alpha, method="linear")  # e.g., 5th pct for 95% set
+        out["joint_hpd_hit"] = bool(jnp.asarray(logpdf_at_theta) >= t)
+
+    return out
+
+
+if __name__ == "__main__":
+    key = jax.random.key(0)
+    K, D = 20_000, 4
+    th_true = jnp.array([0.0, 1.0, -1.0, 0.5])
+    cov = jnp.array([1.0, 0.5, 2.0, 0.2])  # stds
+    x = th_true + cov * jax.random.normal(key, (K, D))
+    m = compute_rep_metrics(x, th_true, level=0.95, want_central=True, want_hpdi=True)
+    print("central hit:", m["hit_central"])
+    print("hpdi hit   :", m["hit_hpdi"])
+    print("central width (mean):", sum(m["width_central"]) / D)
+    print("hpdi    width (mean):", sum(m["width_hpdi"]) / D)

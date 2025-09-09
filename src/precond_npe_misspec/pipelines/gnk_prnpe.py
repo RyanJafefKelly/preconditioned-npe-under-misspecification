@@ -11,8 +11,7 @@ import jax.numpy as jnp
 
 from precond_npe_misspec.examples.gnk import gnk as gnk_quantile
 from precond_npe_misspec.examples.gnk import (
-    # ss_octile,
-    ss_robust,
+    ss_robust,  # ss_octile,
     true_dgp,  # added earlier
 )
 from precond_npe_misspec.pipelines.base_pnpe import (
