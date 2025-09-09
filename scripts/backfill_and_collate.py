@@ -68,6 +68,10 @@ class Args:
     decimals_cov: int = 2
     decimals_bias: int = 3
 
+    filter_n_obs: int | None = None
+    filter_n_sims: int | None = None
+    filter_q_precond: float | None = None  # optional
+
 
 def _samples_in(dirp: Path) -> np.ndarray | None:
     for name in ("posterior_samples_robust.npz", "posterior_samples.npz"):
@@ -78,6 +82,50 @@ def _samples_in(dirp: Path) -> np.ndarray | None:
             # force float64 for stable quantiles; fallback to float32 if needed
             return arr.astype(np.float64, copy=False)
     return None
+
+
+def _read_run_params(dirp: Path) -> tuple[int | None, int | None, float | None]:
+    """Return (n_obs, n_sims, q_precond) from config.json, else from GROUP tokens."""
+    # 1) config.json
+    cfg = dirp / "config.json"
+    if cfg.is_file():
+        try:
+            with open(cfg) as f:
+                j = json.load(f)
+            run = j.get("run", {})
+            n_sims = int(run.get("n_sims")) if "n_sims" in run else None
+            q_precond = float(run.get("q_precond")) if "q_precond" in run else None
+            sim_kwargs = run.get("sim_kwargs", {}) or {}
+            n_obs = int(sim_kwargs.get("n_obs")) if "n_obs" in sim_kwargs else None  # type: ignore
+            return n_obs, n_sims, q_precond
+        except Exception:
+            pass
+    # 2) parse from GROUP folder name: .../<method>/<GROUP>/seed-XX/<DATE>
+    parts = dirp.parts
+    try:
+        i = parts.index("gnk")
+        group = parts[i + 2]
+        n_obs = n_sims = None
+        q = None
+        for tok in group.split("-"):
+            if tok.startswith("n_obs_"):
+                try:
+                    n_obs = int(tok[len("n_obs_") :])
+                except Exception:
+                    pass
+            elif tok.startswith("n_sims_"):
+                try:
+                    n_sims = int(tok[len("n_sims_") :])
+                except Exception:
+                    pass
+            elif tok.startswith("q_"):
+                try:
+                    q = float(tok[len("q_") :])
+                except Exception:
+                    pass
+        return n_obs, n_sims, q
+    except Exception:
+        return None, None, None
 
 
 def _method_from_dir(dirp: Path) -> str:
@@ -103,18 +151,25 @@ def main(a: Args) -> None:
     for p in root.rglob("posterior_samples_robust.npz"):
         candidates[p.parent] = p.name
     for p in root.rglob("posterior_samples.npz"):
-        candidates.setdefault(p.parent, p.name)  # only if robust not present
+        candidates.setdefault(p.parent, p.name)  # only if robust absent
 
-    # select latest timestamp dir per (method, group, seed)
     selected: dict[tuple[str, str, str], Path] = {}
     for d in candidates.keys():
         parts = d.parts
         i = parts.index("gnk")  # results/gnk/<method>/<group>/seed-XX/<DATE>
         method = parts[i + 1]
         group = parts[i + 2]
-        seed_dir = parts[i + 3]  # e.g. 'seed-61'
+        seed_dir = parts[i + 3]
+        # apply filters
+        n_obs, n_sims, q = _read_run_params(d)
+        if (a.filter_n_obs is not None) and (n_obs != a.filter_n_obs):
+            continue
+        if (a.filter_n_sims is not None) and (n_sims != a.filter_n_sims):
+            continue
+        if (a.filter_q_precond is not None) and (q is not None) and (abs(q - a.filter_q_precond) > 1e-12):
+            continue
+        # keep latest timestamp
         key = (method, group, seed_dir)
-        # keep latest DATE lexicographically (YYYYMMDD-HHMMSS)
         if key not in selected or d.name > selected[key].name:
             selected[key] = d
 
