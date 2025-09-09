@@ -187,4 +187,5 @@ def main(a: Args) -> None:
 
 
 if __name__ == "__main__":
-    tyro.cli(main)
+    args = tyro.cli(Args)
+    main(args)
