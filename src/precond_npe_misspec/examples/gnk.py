@@ -7,6 +7,7 @@ from collections.abc import Callable
 import jax
 import jax.numpy as jnp
 import jax.random as random
+import numpy as np
 from jax.typing import ArrayLike
 
 type Array = jax.Array
@@ -64,7 +65,7 @@ def ss_octile(y: ArrayLike) -> Array:
 def true_dgp(
     key: PRNGKey,
     n_obs: int,
-    w: float = 0.9,
+    w: float = 0.6,
     mu1: float = 1.0,
     var1: float = 2.0,
     mu2: float = 7.0,
@@ -113,48 +114,51 @@ def get_summaries_batches(
     return jnp.concatenate(all_octiles, axis=1)
 
 
-# def ss_robust(y):
-#     """Compute robust summary statistics as in Drovandi 2011 #TODO."""
-#     ss_A = _get_ss_A(y)
-#     ss_B = _get_ss_B(y)
-#     ss_g = _get_ss_g(y)
-#     ss_k = _get_ss_k(y)
+def ss_robust(y: ArrayLike) -> Array:
+    """Compute robust summary statistics as in Drovandi 2011 #TODO."""
+    y = jnp.asarray(y)
+    # Ensure 2D: (batch, n_obs)
+    y2 = y[None, :] if y.ndim == 1 else y
+    if y2.ndim != 2:
+        raise ValueError("y must be 1D or 2D of shape (batch, n_obs).")
 
-#     # Combine the summary statistics, (batch should be first dim)
-#     ss_robust = jnp.concatenate(
-#         [ss_A[:, None], ss_B[:, None], ss_g[:, None], ss_k[:, None]], axis=1
-#     )
-#     return jnp.squeeze(ss_robust)
-
-
-# def _get_ss_A(y):
-#     """Compute the median as a summary statistic."""
-#     L2 = jnp.percentile(y, 50, axis=1)
-#     ss_A = L2
-#     return ss_A[:, None]
+    ss_A = _get_ss_A(y2)  # (batch, 1)
+    ss_B = _get_ss_B(y2)  # (batch, 1)
+    ss_g = _get_ss_g(y2)  # (batch, 1)
+    ss_k = _get_ss_k(y2)  # (batch, 1)
+    S = jnp.concatenate([ss_A, ss_B, ss_g, ss_k], axis=1)  # (batch, 4)
+    return jnp.squeeze(S)  # -> (4,) if batch==1 else (batch, 4)
 
 
-# def _get_ss_B(y):
-#     """Compute the interquartile range."""
-#     L1, L3 = jnp.percentile(y, jnp.array([25, 75]), axis=1)
-#     ss_B = L3 - L1
-#     ss_B = jnp.where(ss_B == 0, jnp.finfo(jnp.float32).eps, ss_B)
-#     return ss_B[:, None]
+def _get_ss_A(y: Array) -> Array:
+    """Compute the median as a summary statistic."""
+    L2 = jnp.percentile(y, 50.0, axis=-1, keepdims=True)  # (batch, 1)
+    return L2
 
 
-# def _get_ss_g(y):
-#     """Compute a skewness-like summary statistic."""
-#     L1, L2, L3 = jnp.percentile(y, jnp.array([25, 50, 75]), axis=1)
-#     ss_B = _get_ss_B(y).flatten()
-#     ss_g = (L3 + L1 - 2 * L2) / ss_B
-#     return ss_g[:, None]
+def _get_ss_B(y: Array) -> Array:
+    """Compute the interquartile range."""
+    q = jnp.percentile(y, jnp.array([25.0, 75.0]), axis=-1, keepdims=True)  # (2,batch,1)
+    L1, L3 = q[0], q[1]  # each (batch,1)
+    iqr = L3 - L1
+    eps: Array = jnp.asarray(np.finfo(np.dtype(y.dtype)).eps, dtype=y.dtype)
+    iqr = jnp.where(iqr == 0, eps, iqr)
+    return iqr
 
 
-# def _get_ss_k(y):
-#     """Compute a kurtosis-like summary statistic."""
-#     E1, E3, E5, E7 = jnp.percentile(y,
-#                                     jnp.array([12.5, 37.5, 62.5, 87.5]),
-#                                     axis=1)
-#     ss_B = _get_ss_B(y).flatten()
-#     ss_k = (E7 - E5 + E3 - E1) / ss_B
-#     return ss_k[:, None]
+def _get_ss_g(y: Array) -> Array:
+    """Compute a skewness-like summary statistic."""
+    q = jnp.percentile(y, jnp.array([25.0, 50.0, 75.0]), axis=-1, keepdims=True)  # (3,batch,1)
+    L1, L2, L3 = q[0], q[1], q[2]  # each (batch,1)
+    iqr = _get_ss_B(y)  # (batch,1)
+    sg = (L3 + L1 - 2.0 * L2) / iqr
+    return sg
+
+
+def _get_ss_k(y: Array) -> Array:
+    """Compute a kurtosis-like summary statistic."""
+    q = jnp.percentile(y, jnp.array([12.5, 37.5, 62.5, 87.5]), axis=-1, keepdims=True)  # (4,batch,1)
+    E1, E3, E5, E7 = q[0], q[1], q[2], q[3]
+    iqr = _get_ss_B(y)  # (batch,1)
+    sk = (E7 - E5 + E3 - E1) / iqr
+    return sk
