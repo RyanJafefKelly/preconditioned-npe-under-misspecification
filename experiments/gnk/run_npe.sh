@@ -19,13 +19,12 @@ fi
 
 # Preconditioning ABC
 : "${N_SIMS:=20000}"
-: "${Q_PRECOND:=0.2}"
+: "${Q_PRECOND:=1.0}"
 
 GROUP="th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
 
-OUTDIR="results/gnk/pnpe/${GROUP}/seed-${SEED}/${DATE}"
+OUTDIR="results/gnk/npe/${GROUP}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
-
 
 # Posterior draws
 : "${N_POSTERIOR_DRAWS:=20000}"

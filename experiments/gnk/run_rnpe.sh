@@ -19,12 +19,19 @@ fi
 
 # Preconditioning ABC
 : "${N_SIMS:=20000}"
-: "${Q_PRECOND:=0.2}"
+: "${Q_PRECOND:=1.0}"
 
 GROUP="th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
 
-OUTDIR="results/gnk/pnpe/${GROUP}/seed-${SEED}/${DATE}"
+OUTDIR="results/gnk/rnpe/${GROUP}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
+
+# # Misspecified true DGP (Gaussian mixture) parameters
+# : "${MIX_W:=0.9}"
+# : "${MIX_MU1:=1.0}"
+# : "${MIX_VAR1:=2.0}"
+# : "${MIX_MU2:=7.0}"
+# : "${MIX_VAR2:=2.0}"
 
 
 # Posterior draws
@@ -41,12 +48,27 @@ mkdir -p "$OUTDIR"
 : "${BATCH_SIZE:=512}"
 
 # Summaries + distance
-: "${SUMMARIES:=hexadeciles}"               # octile|duodecile|hexadeciles
+: "${SUMMARIES:=octile}"               # octile|duodecile|hexadeciles
 : "${DISTANCE:=euclidean}"             # euclidean|l1|mmd
 : "${MMD_UNBIASED:=0}"
 : "${MMD_BANDWIDTH:=}"                 # empty -> median heuristic
 
-cmd=(uv run python -m precond_npe_misspec.pipelines.gnk_pnpe
+# Denoising model
+: "${DENOISE_MODEL:=spike_slab}" # laplace|laplace_adaptive|student_t|cauchy|spike_slab
+: "${LAPLACE_ALPHA:=0.3}"
+: "${LAPLACE_MIN_SCALE:=0.01}"
+: "${STUDENT_T_SCALE:=0.05}"
+: "${STUDENT_T_DF:=1.0}"
+: "${CAUCHY_SCALE:=0.05}"
+: "${SPIKE_STD:=0.01}"
+: "${SLAB_SCALE:=0.25}"
+: "${MISSPECIFIED_PROB:=0.5}"
+: "${LEARN_PROB:=0}"                   # 1 to infer rho
+: "${MCMC_WARMUP:=1000}"
+: "${MCMC_SAMPLES:=2000}"
+: "${MCMC_THIN:=1}"
+
+cmd=(uv run python -m precond_npe_misspec.pipelines.gnk_prnpe
   --seed "$SEED"
   --obs_seed "$((10#$SEED + 1234))"
   --outdir "$OUTDIR"
@@ -65,10 +87,23 @@ cmd=(uv run python -m precond_npe_misspec.pipelines.gnk_pnpe
   --batch_size "$BATCH_SIZE"
   --summaries "$SUMMARIES"
   --distance "$DISTANCE"
+  --denoise_model "$DENOISE_MODEL"
+  --laplace_alpha "$LAPLACE_ALPHA"
+  --laplace_min_scale "$LAPLACE_MIN_SCALE"
+  --student_t_scale "$STUDENT_T_SCALE"
+  --student_t_df "$STUDENT_T_DF"
+  --cauchy_scale "$CAUCHY_SCALE"
+  --spike_std "$SPIKE_STD"
+  --slab_scale "$SLAB_SCALE"
+  --misspecified_prob "$MISSPECIFIED_PROB"
+  --mcmc_warmup "$MCMC_WARMUP"
+  --mcmc_samples "$MCMC_SAMPLES"
+  --mcmc_thin "$MCMC_THIN"
 )
 
 [[ -n "$MMD_BANDWIDTH" ]] && cmd+=(--mmd_bandwidth "$MMD_BANDWIDTH")
 [[ "$MMD_UNBIASED" == "1" ]] && cmd+=(--mmd_unbiased)
+[[ "$LEARN_PROB" == "1" ]] && cmd+=(--learn_prob)
 
 printf '%q ' "${cmd[@]}" | tee "${OUTDIR}/cmd.txt"
 echo

@@ -4,13 +4,11 @@ set -euo pipefail
 export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 
 DATE=$(date +"%Y%m%d-%H%M%S")
-OUTDIR="results/gnk_prnpe/${DATE}"
-mkdir -p "$OUTDIR"
 
 : "${SEED:=0}"
 
 # GNK specifics
-: "${N_OBS:=100}"                      # samples in the observed dataset
+: "${N_OBS:=5000}"                      # samples in the observed dataset
 THETA_DEFAULT="3.0 1.0 2.0 0.5"        # (A, B, g, k)
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
@@ -19,16 +17,14 @@ if (( ${#THETA_ARR[@]} != 4 )); then
   exit 1
 fi
 
-# # Misspecified true DGP (Gaussian mixture) parameters
-# : "${MIX_W:=0.9}"
-# : "${MIX_MU1:=1.0}"
-# : "${MIX_VAR1:=2.0}"
-# : "${MIX_MU2:=7.0}"
-# : "${MIX_VAR2:=2.0}"
-
 # Preconditioning ABC
 : "${N_SIMS:=20000}"
 : "${Q_PRECOND:=0.2}"
+
+GROUP="th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
+
+OUTDIR="results/gnk/prnpe/${GROUP}/seed-${SEED}/${DATE}"
+mkdir -p "$OUTDIR"
 
 # Posterior draws
 : "${N_POSTERIOR_DRAWS:=20000}"
@@ -66,9 +62,10 @@ fi
 
 cmd=(uv run python -m precond_npe_misspec.pipelines.gnk_prnpe
   --seed "$SEED"
+  --obs_seed "$((10#$SEED + 1234))"
+  --outdir "$OUTDIR"
   --theta_true "${THETA_ARR[@]}"
   --n_obs "$N_OBS"
-  --mix_w "$MIX_W" --mix_mu1 "$MIX_MU1" --mix_var1 "$MIX_VAR1" --mix_mu2 "$MIX_MU2" --mix_var2 "$MIX_VAR2"
   --n_sims "$N_SIMS"
   --q_precond "$Q_PRECOND"
   --n_posterior_draws "$N_POSTERIOR_DRAWS"
@@ -94,7 +91,6 @@ cmd=(uv run python -m precond_npe_misspec.pipelines.gnk_prnpe
   --mcmc_warmup "$MCMC_WARMUP"
   --mcmc_samples "$MCMC_SAMPLES"
   --mcmc_thin "$MCMC_THIN"
-  --outdir "$OUTDIR"
 )
 
 [[ -n "$MMD_BANDWIDTH" ]] && cmd+=(--mmd_bandwidth "$MMD_BANDWIDTH")
