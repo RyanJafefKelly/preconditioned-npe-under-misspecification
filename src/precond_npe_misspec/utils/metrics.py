@@ -14,6 +14,13 @@ def _ensure_2d(x: Array) -> Array:
     return x if x.ndim == 2 else x.reshape((-1, 1))
 
 
+def posterior_mean_sd(samples: Array) -> tuple[Array, Array]:
+    s = _ensure_2d(samples)  # (K,D)
+    mu = jnp.mean(s, axis=0)  # (D,)
+    sd = jnp.std(s, axis=0)  # population SD over draws; OK for posterior SD
+    return mu, sd
+
+
 def central_ci(samples: Array, alpha: float = 0.05) -> tuple[Array, Array]:
     """Quantile CI per dimension. samples: (K,D). Returns lo, hi shape (D,)."""
     s = _ensure_2d(samples)
@@ -59,11 +66,18 @@ def compute_rep_metrics(
     n_post, level, joint_hpd_hit.
     """
     alpha = 1.0 - level
+    s = _ensure_2d(posterior_samples)
     out: dict[str, Any] = {
         "n_post": int(_ensure_2d(posterior_samples).shape[0]),
         "level": float(level),
     }
     th = jnp.asarray(theta_target)
+
+    mu, sd = posterior_mean_sd(s)
+    bias = mu - th
+    out["post_mean"] = mu.tolist()
+    out["post_sd"] = sd.tolist()
+    out["bias"] = bias.tolist()
 
     if want_central:
         lo, hi = central_ci(posterior_samples, alpha)

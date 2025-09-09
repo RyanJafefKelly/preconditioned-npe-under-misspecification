@@ -1,0 +1,55 @@
+#!/bin/bash -l
+#PBS -N gnk_cov_worker
+#PBS -l walltime=00:20:00
+#PBS -l mem=8GB
+#PBS -l ncpus=1
+#PBS -j oe
+cd "$PBS_O_WORKDIR" || exit 1
+set -euo pipefail
+
+# -------- config from qsub -v (see launcher) --------
+R=${R:-100}                                      # replicates
+METHODS_STR=${METHODS_STR:-"npe rnpe pnpe prnpe"}
+OBS_SEED_OFFSET=${OBS_SEED_OFFSET:-1234}
+THETA_TRUE="${THETA_TRUE:-3.0 1.0 2.0 0.5}"      # A B g k
+THETA_DAGGER="${THETA_DAGGER:-2.3663 4.1757 1.7850 0.1001}"
+N_OBS=${N_OBS:-100}
+N_SIMS=${N_SIMS:-20000}
+Q_PRECOND=${Q_PRECOND:-0.2}
+N_POST=${N_POST:-20000}
+LEVEL=${LEVEL:-0.95}
+
+# -------- derive (replicate, method) from array index --------
+IDX=${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-0}}        # PBS Pro / Torque
+read -r -a METHODS <<< "$METHODS_STR"
+M=${#METHODS[@]}
+R_TOTAL=$((R * M))
+if (( IDX < 0 || IDX >= R_TOTAL )); then
+  echo "Bad array index $IDX with R=$R and M=$M" >&2; exit 2
+fi
+MID=$(( IDX / R ))                               # method id
+RID=$(( IDX % R ))                               # replicate id
+METHOD="${METHODS[$MID]}"
+SEED=$RID
+OBS_SEED=$(( SEED + OBS_SEED_OFFSET ))
+
+export SEED N_OBS N_SIMS Q_PRECOND N_POST
+export THETA="$THETA_TRUE"
+export THETA_TARGET="$THETA_DAGGER"
+
+echo "[worker] idx=$IDX method=$METHOD rep=$RID seed=$SEED obs_seed=$OBS_SEED"
+
+# -------- run one method --------
+case "$METHOD" in
+  npe|rnpe|pnpe|prnpe)
+    bash "experiments/gnk/run_${METHOD}.sh" \
+      2>&1 | tee "logs/${METHOD}_rep${RID}.log"
+    ;;
+  *)
+    echo "Unknown method: $METHOD" >&2; exit 3
+    ;;
+esac
+
+# Done marker (optional)
+mkdir -p "results/_done"
+echo "$(date)  method=$METHOD rep=$RID ok" > "results/_done/${METHOD}_rep${RID}.ok"
