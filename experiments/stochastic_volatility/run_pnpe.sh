@@ -11,7 +11,7 @@ mkdir -p "$OUTDIR"
 : "${T:=100}"
 
 # θ is 2D: (sigma_rw, nu). Space‑separated ASCII numbers only. No quotes.
-THETA_DEFAULT="0.001 10.0"
+THETA_DEFAULT="0.2 20.0"
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
 if (( ${#THETA_ARR[@]} != 2 )); then
@@ -20,22 +20,22 @@ if (( ${#THETA_ARR[@]} != 2 )); then
 fi
 
 # Misspecification block scaling (applies to observed data only)
-: "${SIGMA_MS:=2}"        # 0=no misspecification; else scale by 5**SIGMA_MS within block
+: "${SIGMA_MS:=0}"        # 0=no misspecification; else scale by 5**SIGMA_MS within block
 : "${BLOCK_START:=50}"    # 1‑indexed inclusive
 : "${BLOCK_END:=65}"      # 1‑indexed inclusive
 
 # Preconditioning ABC
-: "${N_SIMS:=20000}"
+: "${N_SIMS:=50000}"
 : "${Q_PRECOND:=0.2}"
 
 # Posterior sampling
 : "${N_POSTERIOR_DRAWS:=20000}"
 
 # Flow hyperparameters
-: "${FLOW_LAYERS:=8}"
-: "${NN_WIDTH:=128}"
+: "${FLOW_LAYERS:=5}"
+: "${NN_WIDTH:=50}"
 : "${KNOTS:=10}"
-: "${INTERVAL:=8.0}"
+: "${INTERVAL:=5.0}"
 : "${LEARNING_RATE:=5e-4}"
 : "${MAX_EPOCHS:=500}"
 : "${MAX_PATIENCE:=10}"
