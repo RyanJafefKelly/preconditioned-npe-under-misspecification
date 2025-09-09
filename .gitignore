@@ -207,3 +207,17 @@ results/
 # SageMath
 # ------------------------------
 *.sage.py
+
+# PBS
+**/*.o[0-9]*         # e.g., jobname.o12030731 or .o12030731.96
+**/*.e[0-9]*         # e.g., jobname.e12030731 or .e12030731.96
+
+logs/
+**/logs/
+*.log
+
+# In case variables didn't expand and left literal $ names
+*\$PBS_JOBID*
+*\$PBS_ARRAY_INDEX*
+*\$JOB_ID*
+*\$ARRAY_INDEX*
