@@ -56,6 +56,28 @@ def laplace_denoiser(
     numpyro.sample("y", dist.Laplace(x, scale), obs=y_obs_w)
 
 
+# def spike_and_slab_denoiser(  # type: ignore
+#     y_obs_w: jnp.ndarray,
+#     flow_s: FlowDist,
+#     spike_std: float = 0.01,
+#     slab_scale: float = 0.25,
+#     misspecified_prob: float = 0.5,
+#     learn_prob: bool = False,
+# ):
+#     """TODO: Docstring ... think on best MCMC approach... okay to avoid discrete step?."""
+#     if learn_prob:
+#         p = numpyro.sample("misspecified_prob", dist.Uniform(0, 1))
+#     else:
+#         p = misspecified_prob
+#     with numpyro.plate("d", y_obs_w.shape[-1]):
+#         misspecified = numpyro.sample("misspecified", dist.Bernoulli(probs=p))
+#     x = fj_sample("x", flow_s)
+#     with numpyro.handlers.mask(mask=(~misspecified.astype(bool))):
+#         numpyro.sample("y_w", dist.Normal(x, spike_std), obs=y_obs_w)
+#     with numpyro.handlers.mask(mask=misspecified.astype(bool)):
+#         numpyro.sample("y_m", dist.Cauchy(x, slab_scale), obs=y_obs_w)
+
+
 def spike_and_slab_denoiser(  # type: ignore
     y_obs_w: jnp.ndarray,
     flow_s: FlowDist,
@@ -64,18 +86,15 @@ def spike_and_slab_denoiser(  # type: ignore
     misspecified_prob: float = 0.5,
     learn_prob: bool = False,
 ):
-    """Sparse robust error model. Uses HMC-Gibbs to update Bernoulli 'misspecified' vars."""
-    if learn_prob:
-        p = numpyro.sample("misspecified_prob", dist.Uniform(0, 1))
-    else:
-        p = misspecified_prob
-    with numpyro.plate("d", y_obs_w.shape[-1]):
-        misspecified = numpyro.sample("misspecified", dist.Bernoulli(probs=p))
-    x = fj_sample("x", flow_s)
-    with numpyro.handlers.mask(mask=(~misspecified.astype(bool))):
-        numpyro.sample("y_w", dist.Normal(x, spike_std), obs=y_obs_w)
-    with numpyro.handlers.mask(mask=misspecified.astype(bool)):
-        numpyro.sample("y_m", dist.Cauchy(x, slab_scale), obs=y_obs_w)
+    """TODO: Docstring ... think on best MCMC approach... okay to avoid discrete step?."""
+    rho = numpyro.sample("misspecified_prob", dist.Uniform(0, 1)) if learn_prob else misspecified_prob
+    x = fj_sample("x", flow_s)  # latent denoised summaries
+    ll0 = dist.Normal(x, spike_std).log_prob(y_obs_w)  # spike
+    ll1 = dist.Cauchy(x, slab_scale).log_prob(y_obs_w)  # slab
+    # log p(y|x,ρ) = Σ_j log[(1-ρ) exp(ll0_j) + ρ exp(ll1_j)]
+    log_mix = jnp.logaddexp(jnp.log1p(-rho) + ll0, jnp.log(rho) + ll1)
+    numpyro.factor("mix_ll", jnp.sum(log_mix))
+    return None
 
 
 def spike_and_slab_marginal_denoiser(
@@ -86,7 +105,6 @@ def spike_and_slab_marginal_denoiser(
     misspecified_prob: float = 0.5,
     learn_prob: bool = False,
 ) -> None:
-    # rho ∈ (0,1)
     rho = numpyro.sample("misspecified_prob", dist.Uniform(0, 1)) if learn_prob else misspecified_prob
     x = fj_sample("x", flow_s)  # latent denoised summaries
     ll0 = dist.Normal(x, spike_std).log_prob(y_obs_w)  # spike
@@ -134,7 +152,7 @@ def run_denoising_mcmc(  # type: ignore
             num_warmup=num_warmup,
             num_samples=num_samples,
             thinning=thinning,
-            progress_bar=False,
+            progress_bar=True,
         )
         mcmc.run(key, y_obs_w=y_obs_w, flow_s=flow_s)
     elif model == "laplace_adaptive":
@@ -148,7 +166,7 @@ def run_denoising_mcmc(  # type: ignore
             num_warmup=num_warmup,
             num_samples=num_samples,
             thinning=thinning,
-            progress_bar=False,
+            progress_bar=True,
         )
         mcmc.run(key, y_obs_w=y_obs_w, flow_s=flow_s)
     elif model == "student_t":
@@ -158,7 +176,7 @@ def run_denoising_mcmc(  # type: ignore
             num_warmup=num_warmup,
             num_samples=num_samples,
             thinning=thinning,
-            progress_bar=False,
+            progress_bar=True,
         )
         mcmc.run(key, y_obs_w=y_obs_w, flow_s=flow_s)
     elif model == "cauchy":
@@ -168,12 +186,12 @@ def run_denoising_mcmc(  # type: ignore
             num_warmup=num_warmup,
             num_samples=num_samples,
             thinning=thinning,
-            progress_bar=False,
+            progress_bar=True,
         )
         mcmc.run(key, y_obs_w=y_obs_w, flow_s=flow_s)
     elif model == "spike_slab":
         kernel = NUTS(
-            lambda y_obs_w, flow_s: spike_and_slab_marginal_denoiser(
+            lambda y_obs_w, flow_s: spike_and_slab_denoiser(
                 y_obs_w, flow_s, spike_std, slab_scale, misspecified_prob, learn_prob
             )
         )
@@ -182,13 +200,14 @@ def run_denoising_mcmc(  # type: ignore
             num_warmup=num_warmup,
             num_samples=num_samples,
             thinning=thinning,
-            progress_bar=False,
+            progress_bar=True,
         )
         mcmc.run(key, y_obs_w=y_obs_w, flow_s=flow_s)
     else:
         raise ValueError(f"Unknown model '{model}'")
 
     out = mcmc.get_samples(group_by_chain=False)
+    mcmc.print_summary()
     x_samples = out["x"]
     res = {"x_samples": x_samples}
 
