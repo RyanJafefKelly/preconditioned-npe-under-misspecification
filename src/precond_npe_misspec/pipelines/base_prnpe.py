@@ -1,15 +1,17 @@
-# src/precond_npe_misspec/pipelines/base_prnpe.py
+"""Base code for preconditioned robust NPE (PNPE) experiments."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Literal
+from dataclasses import asdict, dataclass
+from typing import Any, Literal, cast
 
 import equinox as eqx
 import flowjax.bijections as bij
 import jax
 import jax.numpy as jnp
-from flowjax.distributions import Normal, Transformed
+from flowjax.distributions import Normal
+from flowjax.distributions import Transformed as _Transformed
 from flowjax.flows import coupling_flow
 from flowjax.train import fit_to_data
 
@@ -17,15 +19,14 @@ from precond_npe_misspec.pipelines.base_pnpe import (
     ExperimentSpec,
     FlowConfig,
     RunConfig,
-    preconditioning_step,  # reuse your ABC step
+    preconditioning_step,
 )
 from precond_npe_misspec.robust.denoise import run_denoising_mcmc
+from precond_npe_misspec.utils.artifacts import save_artifacts
 
 type Array = jax.Array
 DistanceFn = Callable[[Array, Array], Array]
 DistanceFactory = Callable[[Array], DistanceFn]
-
-# ---------------- Extra builders ----------------
 
 
 def default_summaries_flow_builder(
@@ -34,9 +35,9 @@ def default_summaries_flow_builder(
     def _builder(key: Array, cfg: FlowConfig) -> eqx.Module:
         return coupling_flow(
             key=key,
-            base_dist=Normal(jnp.zeros(s_dim)),  # random variable is s
+            base_dist=Normal(jnp.zeros(s_dim)),  # base dist is summaries
             transformer=bij.RationalQuadraticSpline(knots=cfg.knots, interval=cfg.interval),
-            cond_dim=None,  # unconditional q(s)
+            cond_dim=None,  # unconditional q(s) ... used in denoising step
             flow_layers=cfg.flow_layers,
             nn_width=cfg.nn_width,
         )
@@ -44,18 +45,16 @@ def default_summaries_flow_builder(
     return _builder
 
 
-# ---------------- Helpers ----------------
-
-
 def _standardise(x: jnp.ndarray, m: jnp.ndarray, s: jnp.ndarray) -> jnp.ndarray:
-    return (x - m) / (s + 1e-6)
+    return (x - m) / (s + 1e-8)
 
 
 @dataclass
 class RobustRunResult:
     theta_acc_precond: jnp.ndarray
-    posterior_flow: eqx.Module  # q(theta | s) in original theta scale
-    s_flow: eqx.Module  # q(s) in whitened s-space
+    S_acc_precond: jnp.ndarray
+    posterior_flow: eqx.Module  # q(theta | s)
+    s_flow: eqx.Module  # q(s)
     x_obs: jnp.ndarray
     s_obs: jnp.ndarray
     S_mean: jnp.ndarray
@@ -65,9 +64,8 @@ class RobustRunResult:
     denoised_s_samples: jnp.ndarray  # samples ~ p(s | y_obs)
     posterior_samples_at_obs_robust: jnp.ndarray
     misspec_probs: jnp.ndarray | None
-
-
-# ---------------- Core steps ----------------
+    loss_history_theta: Any | None
+    loss_history_s: Any | None
 
 
 def _make_dataset_summaries(
@@ -75,7 +73,7 @@ def _make_dataset_summaries(
     n: int,
     batch_size: int | None,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Generate (theta, S) safely in batches given a helper closure; mirrors your PNPE batching."""
+    """Generate (theta, S) pairs in batches."""
     if batch_size is None:
         batch_size = max(1, min(n, 2048))
     th_parts, S_parts = [], []
@@ -93,7 +91,7 @@ def _fit_posterior_flow(
     theta_acc: jnp.ndarray,
     S_acc: jnp.ndarray,
     flow_cfg: FlowConfig,
-) -> tuple[eqx.Module, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+) -> tuple[eqx.Module, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     S_mean, S_std = jnp.mean(S_acc, 0), jnp.std(S_acc, 0) + 1e-8
     th_mean, th_std = jnp.mean(theta_acc, 0), jnp.std(theta_acc, 0) + 1e-8
     S_proc = _standardise(S_acc, S_mean, S_std)
@@ -101,7 +99,7 @@ def _fit_posterior_flow(
 
     k_build, k_fit = jax.random.split(key)
     flow0 = spec.build_posterior_flow(k_build, flow_cfg)
-    flow_fit, _ = fit_to_data(
+    flow_fit, losses_theta = fit_to_data(
         key=k_fit,
         dist=flow0,
         data=(th_proc, S_proc),
@@ -111,18 +109,15 @@ def _fit_posterior_flow(
         batch_size=flow_cfg.batch_size,
         show_progress=True,
     )
-    # Create an affine bijection for standardisation
-    affine_bijection = bij.Affine(-th_mean / th_std, 1.0 / th_std)
-    # Invert the affine bijection, specifying shape and cond_shape=None
-    invert_bijection = bij.Invert(bijection=affine_bijection, shape=th_proc.shape[1:], cond_shape=None)
-    # Wrap the fitted flow with the invert bijection and a base distribution
-    posterior_flow = Transformed(
+    Invert = cast(Any, bij.Invert)
+    TransformedD = cast(Any, _Transformed)
+    affine_bij = bij.Affine(-th_mean / th_std, 1.0 / th_std)
+    invert_bij = Invert(affine_bij)
+    posterior_flow = TransformedD(
         base_dist=flow_fit,
-        bijection=invert_bijection,
-        shape=th_proc.shape[1:],  # shape of theta
-        cond_shape=S_proc.shape[1:],  # shape of summaries
+        bijection=invert_bij,
     )
-    return posterior_flow, S_mean, S_std, th_mean, th_std
+    return posterior_flow, S_mean, S_std, th_mean, th_std, losses_theta
 
 
 def _fit_summaries_flow(
@@ -130,13 +125,13 @@ def _fit_summaries_flow(
     s_dim: int,
     S_train: jnp.ndarray,
     flow_cfg: FlowConfig,
-) -> eqx.Module:
+) -> tuple[eqx.Module, Any]:
     S_mean, S_std = jnp.mean(S_train, 0), jnp.std(S_train, 0) + 1e-8
     S_proc = _standardise(S_train, S_mean, S_std)
 
     k_build, k_fit = jax.random.split(key)
     s_flow0 = default_summaries_flow_builder(s_dim)(k_build, flow_cfg)
-    s_flow_fit, _ = fit_to_data(
+    s_flow_fit, losses_s = fit_to_data(
         key=k_fit,
         dist=s_flow0,
         data=S_proc,  # unconditional MLE on summaries
@@ -147,7 +142,7 @@ def _fit_summaries_flow(
         show_progress=True,
     )
 
-    return s_flow_fit
+    return s_flow_fit, losses_s
 
 
 def _sample_robust_posterior(
@@ -177,9 +172,6 @@ def _sample_robust_posterior(
     return jnp.concatenate(out, axis=0)
 
 
-# ---------------- Orchestration ----------------
-
-
 def run_experiment_prnpe(
     spec: ExperimentSpec,
     run: RunConfig,
@@ -191,14 +183,14 @@ def run_experiment_prnpe(
     mcmc_thinning: int = 1,
 ) -> RobustRunResult:
     rng = jax.random.key(run.seed)
+    obs_seed = jax.random.key(run.obs_seed)
+
     sim_kwargs = {} if run.sim_kwargs is None else dict(run.sim_kwargs)
 
     # Observed data
-    rng, k_obs = jax.random.split(rng)
+    rng, k_obs = jax.random.split(obs_seed)
     x_obs = spec.true_dgp(k_obs, jnp.asarray(run.theta_true), **sim_kwargs)
-    print("x_obs.shape, ", x_obs.shape)
     s_obs = spec.summaries(x_obs)
-    print("s_obs, ", s_obs)
 
     # Preconditioning ABC -> accepted (theta, S)
     rng, k_pre = jax.random.split(rng)
@@ -206,12 +198,12 @@ def run_experiment_prnpe(
 
     # Train q(theta|s) on accepted set
     rng, k_postfit = jax.random.split(rng)
-    posterior_flow, S_mean, S_std, th_mean, th_std = _fit_posterior_flow(k_postfit, spec, theta_acc, S_acc, flow_cfg)
+    posterior_flow, S_mean, S_std, th_mean, th_std, losses_theta = _fit_posterior_flow(
+        k_postfit, spec, theta_acc, S_acc, flow_cfg
+    )
 
-    # Train q(s) on prior predictive summaries (reuse S_acc for speed, or draw fresh if you prefer)
-    # Using S_acc is fine because RNPE only needs a good density baseline near posterior support.
     rng, k_sfit = jax.random.split(rng)
-    s_flow = _fit_summaries_flow(k_sfit, spec.s_dim, S_acc, flow_cfg)
+    s_flow, losses_s = _fit_summaries_flow(k_sfit, spec.s_dim, S_acc, flow_cfg)
 
     # Denoise observed summaries: work in whitened s-space (same stats as for q(theta|s))
     s_obs_w = _standardise(s_obs, S_mean, S_std)
@@ -235,8 +227,9 @@ def run_experiment_prnpe(
     rng, k_mix = jax.random.split(rng)
     th_samps_robust = _sample_robust_posterior(k_mix, posterior_flow, s_denoised_w, run.n_posterior_draws)
 
-    return RobustRunResult(
+    result = RobustRunResult(
         theta_acc_precond=theta_acc,
+        S_acc_precond=S_acc,
         posterior_flow=posterior_flow,
         s_flow=s_flow,
         x_obs=x_obs,
@@ -248,4 +241,52 @@ def run_experiment_prnpe(
         denoised_s_samples=s_denoised_w,
         posterior_samples_at_obs_robust=th_samps_robust,
         misspec_probs=mcmc_out.get("misspec_probs", None),
+        loss_history_theta=losses_theta,
+        loss_history_s=losses_s,
     )
+
+    if run.outdir:
+        save_artifacts(
+            outdir=run.outdir,
+            spec={
+                "name": spec.name,
+                "theta_dim": spec.theta_dim,
+                "s_dim": spec.s_dim,
+                "theta_labels": (
+                    list(spec.theta_labels)  # type: ignore
+                    if getattr(spec, "theta_labels", None)
+                    else None
+                ),
+                "summary_labels": (
+                    list(spec.summary_labels)  # type: ignore
+                    if getattr(spec, "summary_labels", None)
+                    else None
+                ),
+            },
+            run_cfg=asdict(run),
+            flow_cfg=asdict(flow_cfg),
+            posterior_flow=result.posterior_flow,
+            s_flow=result.s_flow,
+            s_obs=result.s_obs,
+            posterior_samples=None,  # PNPE path not used here
+            robust_posterior_samples=result.posterior_samples_at_obs_robust,
+            theta_acc=result.theta_acc_precond,
+            S_acc=result.S_acc_precond,
+            S_mean=result.S_mean,
+            S_std=result.S_std,
+            th_mean=result.th_mean_post,
+            th_std=result.th_std_post,
+            denoised_s_samples=result.denoised_s_samples,
+            misspec_probs=result.misspec_probs,
+            loss_history_theta=result.loss_history_theta,
+            loss_history_s=result.loss_history_s,
+            theta_labels=(
+                list(spec.theta_labels) if getattr(spec, "theta_labels", None) else None  # type: ignore
+            ),
+            summary_labels=(
+                list(spec.summary_labels)  # type: ignore
+                if getattr(spec, "summary_labels", None)
+                else None
+            ),
+        )
+    return result

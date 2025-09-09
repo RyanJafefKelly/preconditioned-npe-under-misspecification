@@ -1,26 +1,32 @@
+"""Base code for preconditioned NPE (PNPE) experiments."""
+
 from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import asdict, dataclass
+from typing import Any, cast
 
 import equinox as eqx
 import flowjax.bijections as bij
 import jax
 import jax.numpy as jnp
-from flowjax.distributions import Normal, Transformed
+import matplotlib
+from flowjax.distributions import Normal
+from flowjax.distributions import Transformed as _Transformed
 from flowjax.flows import coupling_flow
 from flowjax.train import fit_to_data
 
 from precond_npe_misspec.utils import distances as dist
+from precond_npe_misspec.utils.artifacts import save_artifacts
 
 type Array = jax.Array
 DistanceFn = Callable[[Array, Array], Array]
 DistanceFactory = Callable[[Array], DistanceFn]  # input: S_ref_raw (n,d)
 
+matplotlib.use("Agg")
 
-# ---------------- Spec and configs ----------------
+EPS = 1e-8
 
 
 @dataclass(frozen=True)
@@ -33,10 +39,12 @@ class ExperimentSpec:
     simulate: Callable[..., jnp.ndarray]  # simulate(key, theta, **sim_kwargs) -> x
     summaries: Callable[[jnp.ndarray], jnp.ndarray]  # s = summaries(x)
     # Builders
-    build_theta_flow: Callable[[Array, FlowConfig], eqx.Module]
+    # build_theta_flow: Callable[[Array, FlowConfig], eqx.Module]
     build_posterior_flow: Callable[[Array, FlowConfig], eqx.Module]
     # Optional distance factory (as in base_nle_abc)
     make_distance: DistanceFactory | None = None
+    theta_labels: tuple[str, ...] | None = None
+    summary_labels: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -54,7 +62,9 @@ class FlowConfig:
 @dataclass(frozen=True)
 class RunConfig:
     seed: int = 0
+    obs_seed: int = 1234
     theta_true: float | jnp.ndarray = 0.0
+    outdir: str | None = None
     # Preconditioning ABC
     n_sims: int = 200_000  # number of simulations to run
     q_precond: float = 0.1  # acceptance quantile
@@ -65,11 +75,15 @@ class RunConfig:
     # Distances
     n_rep_summaries: int = 1
     batch_size: int = 256
+    # Plot/save options
+    fig_dpi: int = 160
+    fig_format: str = "pdf"
 
 
 @dataclass
 class RunResult:
     theta_acc_precond: jnp.ndarray
+    S_acc_precond: jnp.ndarray
     posterior_flow: eqx.Module
     x_obs: jnp.ndarray
     s_obs: jnp.ndarray
@@ -79,26 +93,24 @@ class RunResult:
     th_mean_post: jnp.ndarray
     th_std_post: jnp.ndarray
     posterior_samples_at_obs: jnp.ndarray
-
-
-# ---------------- Helpers ----------------
+    loss_history: Any
 
 
 # NOTE: DO I ACTUALLY NEED THIS FOR PNPE? I dont think so...
-def default_theta_flow_builder(
-    theta_dim: int,
-) -> Callable[[Array, FlowConfig], eqx.Module]:
-    def _builder(key: Array, cfg: FlowConfig) -> eqx.Module:
-        return coupling_flow(
-            key=key,
-            base_dist=Normal(jnp.zeros(theta_dim)),
-            transformer=bij.RationalQuadraticSpline(knots=cfg.knots, interval=cfg.interval),
-            cond_dim=None,
-            flow_layers=cfg.flow_layers,
-            nn_width=cfg.nn_width,
-        )
+# def default_theta_flow_builder(
+#     theta_dim: int,
+# ) -> Callable[[Array, FlowConfig], eqx.Module]:
+#     def _builder(key: Array, cfg: FlowConfig) -> eqx.Module:
+#         return coupling_flow(
+#             key=key,
+#             base_dist=Normal(jnp.zeros(theta_dim)),
+#             transformer=bij.RationalQuadraticSpline(knots=cfg.knots, interval=cfg.interval),
+#             cond_dim=None,
+#             flow_layers=cfg.flow_layers,
+#             nn_width=cfg.nn_width,
+#         )
 
-    return _builder
+#     return _builder
 
 
 def default_posterior_flow_builder(theta_dim: int, s_dim: int) -> Callable[[Array, FlowConfig], eqx.Module]:
@@ -116,7 +128,7 @@ def default_posterior_flow_builder(theta_dim: int, s_dim: int) -> Callable[[Arra
 
 
 def _standardise(x: jnp.ndarray, m: jnp.ndarray, s: jnp.ndarray) -> jnp.ndarray:
-    return (x - m) / (s + 1e-6)
+    return (x - m) / s
 
 
 def _make_dataset(
@@ -132,7 +144,7 @@ def _make_dataset(
 
     k_theta, k_sim = jax.random.split(key)
 
-    @eqx.filter_jit  # type: ignore[misc]
+    @eqx.filter_jit  # type: ignore
     def _simulate_batch(th_keys: Array, sm_keys: Array) -> tuple[Array, Array]:
         thetas_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
         xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, thetas_b)
@@ -202,7 +214,7 @@ def _abc_rejection_with_sim(
     S_all = jnp.concatenate(S_chunks, axis=0)  # (N, d)
     d_all = jnp.concatenate(d_chunks, axis=0)  # (N,)
 
-    # Drop non-finite distances defensively.
+    # Drop non-finite distances
     finite = jnp.isfinite(d_all)
     thetas_all = thetas_all[finite]
     S_all = S_all[finite]
@@ -214,7 +226,7 @@ def _abc_rejection_with_sim(
 
     # Indices of the n_keep smallest distances.
     idx = jnp.argpartition(d_all, n_keep - 1)[:n_keep]
-    # Optional: sort accepted by distance.
+    # Sort accepted by distance.
     idx = idx[jnp.argsort(d_all[idx])]
 
     theta_acc = thetas_all[idx]
@@ -269,6 +281,7 @@ class _PosteriorTrained:
     S_std: jnp.ndarray
     th_mean: jnp.ndarray
     th_std: jnp.ndarray
+    losses: Any
 
 
 def npe_step(
@@ -284,8 +297,8 @@ def npe_step(
     # TODO:
 
     # 2) Standardise for stable training
-    S_mean, S_std = jnp.mean(S_pilot, 0), jnp.std(S_pilot, 0) + 1e-8
-    th_mean, th_std = jnp.mean(theta_acc, 0), jnp.std(theta_acc, 0) + 1e-8
+    S_mean, S_std = jnp.mean(S_pilot, 0), jnp.std(S_pilot, 0) + EPS
+    th_mean, th_std = jnp.mean(theta_acc, 0), jnp.std(theta_acc, 0) + EPS
     S_proc = _standardise(S_pilot, S_mean, S_std)
     th_proc = _standardise(theta_acc, th_mean, th_std)
 
@@ -302,23 +315,26 @@ def npe_step(
         batch_size=flow_cfg.batch_size,
         show_progress=True,
     )
+
+    Invert = cast(Any, bij.Invert)
+    TransformedD = cast(Any, _Transformed)
     affine_bij = bij.Affine(-th_mean / th_std, 1.0 / th_std)
-    invert_bij = bij.Invert(bijection=affine_bij, shape=th_mean.shape, cond_shape=None)
-    posterior_flow = Transformed(
+    invert_bij = Invert(affine_bij)
+    posterior_flow = TransformedD(
         base_dist=flow_fit,
         bijection=invert_bij,
-        shape=th_mean.shape,
-        cond_shape=S_mean.shape,
     )
-    return _PosteriorTrained(posterior_flow, S_mean, S_std, th_mean, th_std)
+    return _PosteriorTrained(posterior_flow, S_mean, S_std, th_mean, th_std, _losses)
 
 
 def run_experiment(spec: ExperimentSpec, run: RunConfig, flow_cfg: FlowConfig) -> RunResult:
     rng = jax.random.key(run.seed)
+    obs_seed = jax.random.key(run.obs_seed)
+
     sim_kwargs = {} if run.sim_kwargs is None else dict(run.sim_kwargs)
 
     # Observed data
-    rng, k_obs = jax.random.split(rng)
+    rng, k_obs = jax.random.split(obs_seed)
     x_obs = spec.true_dgp(k_obs, jnp.asarray(run.theta_true), **sim_kwargs)
     s_obs = spec.summaries(x_obs)
 
@@ -335,8 +351,9 @@ def run_experiment(spec: ExperimentSpec, run: RunConfig, flow_cfg: FlowConfig) -
     print("s_obs_w: ", s_obs_w)
     th_samps = posterior.flow.sample(k_post, (run.n_posterior_draws,), condition=s_obs_w)
 
-    return RunResult(
+    result = RunResult(
         theta_acc_precond=theta_acc,
+        S_acc_precond=S_acc,
         posterior_flow=posterior.flow,
         x_obs=x_obs,
         s_obs=s_obs,
@@ -345,4 +362,31 @@ def run_experiment(spec: ExperimentSpec, run: RunConfig, flow_cfg: FlowConfig) -
         th_mean_post=posterior.th_mean,
         th_std_post=posterior.th_std,
         posterior_samples_at_obs=th_samps,
+        loss_history=posterior.losses,
     )
+
+    if run.outdir:
+        save_artifacts(
+            outdir=run.outdir,
+            spec={
+                "name": spec.name,
+                "theta_dim": spec.theta_dim,
+                "s_dim": spec.s_dim,
+                "theta_labels": list(spec.theta_labels) if spec.theta_labels else None,
+            },
+            run_cfg=asdict(run),
+            flow_cfg=asdict(flow_cfg),
+            posterior_flow=result.posterior_flow,
+            s_obs=result.s_obs,
+            posterior_samples=result.posterior_samples_at_obs,
+            theta_acc=result.theta_acc_precond,
+            S_acc=result.S_acc_precond,
+            S_mean=result.S_mean,
+            S_std=result.S_std,
+            th_mean=result.th_mean_post,
+            th_std=result.th_std_post,
+            loss_history=result.loss_history,
+            theta_labels=list(spec.theta_labels) if spec.theta_labels else None,
+        )
+
+    return result
