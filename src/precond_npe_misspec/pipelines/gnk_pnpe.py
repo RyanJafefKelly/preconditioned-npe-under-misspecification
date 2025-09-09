@@ -7,13 +7,12 @@ from typing import Literal
 import jax
 import jax.numpy as jnp
 
-from precond_npe_misspec.examples.gnk import gnk, ss_octile, true_dgp
+from precond_npe_misspec.examples.gnk import gnk, ss_robust, true_dgp
 from precond_npe_misspec.pipelines.base_pnpe import (
     ExperimentSpec,
     FlowConfig,
     RunConfig,
     default_posterior_flow_builder,
-    default_theta_flow_builder,
     run_experiment,
 )
 
@@ -24,6 +23,8 @@ type Array = jax.Array
 class Config:
     # Data‑generating setup
     seed: int = 0
+    obs_seed: int = 1234
+    outdir: str | None = None
     # model params: (A, B, g, k)
     theta_true: tuple[float, float, float, float] = (3.0, 1.0, 2.0, 0.5)
     n_obs: int = 100
@@ -62,9 +63,6 @@ class Config:
     k_min: float = 0.0
     k_max: float = 10.0
 
-    # To save plots to
-    outdir: str = ""
-
 
 def _prior_sample_factory(cfg: Config) -> Callable[[Array], jnp.ndarray]:
     lo = jnp.array([cfg.A_min, cfg.B_min, cfg.g_min, cfg.k_min])
@@ -86,7 +84,7 @@ def simulate_gnk(key: Array, theta: jnp.ndarray, *, n_obs: int) -> jnp.ndarray:
 
 def main(cfg: Config) -> None:
     theta_dim = 4
-    s_dim = 7  # TODO: manual specified ... octiles (so 7 dims)
+    s_dim = 4  # TODO: manual specified ... octiles (so 7 dims)
 
     flow_cfg = FlowConfig(
         flow_layers=cfg.flow_layers,
@@ -100,6 +98,8 @@ def main(cfg: Config) -> None:
     )
     run_cfg = RunConfig(
         seed=cfg.seed,
+        obs_seed=cfg.obs_seed,
+        outdir=cfg.outdir,
         theta_true=jnp.asarray(cfg.theta_true),
         n_sims=cfg.n_sims,
         q_precond=cfg.q_precond,
@@ -117,8 +117,8 @@ def main(cfg: Config) -> None:
         prior_sample=prior_sample,
         true_dgp=lambda key, _, **kw: true_dgp(key, n_obs=cfg.n_obs),  # well‑specified
         simulate=lambda key, theta, **kw: simulate_gnk(key, theta, n_obs=cfg.n_obs),
-        summaries=ss_octile,
-        build_theta_flow=default_theta_flow_builder(theta_dim),
+        summaries=ss_robust,
+        # build_theta_flow=default_theta_flow_builder(theta_dim),
         build_posterior_flow=default_posterior_flow_builder(theta_dim, s_dim),
         # keep Euclidean distance (default) for quantile summaries
     )
@@ -126,7 +126,7 @@ def main(cfg: Config) -> None:
     res = run_experiment(spec, run_cfg, flow_cfg)
     print("mean: ", res.S_mean)
     print("std: ", res.S_std)
-    pseudo_true = (1.17, 1.50, 0.41, 0.23)
+    pseudo_true = (2.3663, 4.1757, 1.7850, 0.1001)
 
     def qtiles(arr: jnp.ndarray) -> tuple[float, float, float]:
         q = jnp.quantile(arr, jnp.array([0.025, 0.5, 0.975]), axis=0)

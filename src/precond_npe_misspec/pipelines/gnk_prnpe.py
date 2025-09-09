@@ -6,15 +6,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
-import flowjax.bijections as bij
 import jax
 import jax.numpy as jnp
-from flowjax.distributions import Normal
-from flowjax.flows import coupling_flow
 
 from precond_npe_misspec.examples.gnk import gnk as gnk_quantile
 from precond_npe_misspec.examples.gnk import (
-    ss_octile,
+    # ss_octile,
+    ss_robust,
     true_dgp,  # added earlier
 )
 from precond_npe_misspec.pipelines.base_pnpe import (
@@ -60,13 +58,12 @@ def _simulate_gnk(key: Array, theta: jnp.ndarray, n_obs: int) -> jnp.ndarray:
     return gnk_quantile(z, A, B, g, k)
 
 
-# ---- Config ----
-
-
 @dataclass
 class Config:
     # Data and misspecification
     seed: int = 0
+    obs_seed: int = 1234
+    outdir: str | None = None
     theta_true: tuple[float, float, float, float] = (3.0, 1.0, 2.0, 0.5)
     n_obs: int = 100
     mix_w: float = 0.9
@@ -125,12 +122,9 @@ class Config:
     k_min: float = 0.0
     k_max: float = 10.0
 
-    # To save plots to
-    outdir: str = ""
-
 
 def main(cfg: Config) -> None:
-    s_dim = 7  # NOTE: Manually set for octile summaries
+    s_dim = 4  # NOTE: Manually set for octile summaries
     theta_dim = 4
 
     # Flow training hyperparams
@@ -146,6 +140,8 @@ def main(cfg: Config) -> None:
     )
     run_cfg = RunConfig(
         seed=cfg.seed,
+        obs_seed=cfg.obs_seed,
+        outdir=cfg.outdir,
         theta_true=jnp.asarray(cfg.theta_true),
         n_sims=cfg.n_sims,
         q_precond=cfg.q_precond,
@@ -166,15 +162,15 @@ def main(cfg: Config) -> None:
         prior_sample=prior_sample,
         true_dgp=lambda key, _, **kw: true_dgp(key, n_obs=cfg.n_obs),  # well‑specified
         simulate=lambda key, theta, **kw: _simulate_gnk(key, theta, n_obs=cfg.n_obs),
-        summaries=lambda y: ss_octile(y),  # y is (n_obs,)
-        build_theta_flow=lambda key, fc: coupling_flow(  # not used here but harmless
-            key=key,
-            base_dist=Normal(jnp.zeros(theta_dim)),
-            transformer=bij.RationalQuadraticSpline(knots=fc.knots, interval=fc.interval),
-            cond_dim=0,
-            flow_layers=fc.flow_layers,
-            nn_width=fc.nn_width,
-        ),
+        summaries=lambda y: ss_robust(y),  # y is (n_obs,)
+        # build_theta_flow=lambda key, fc: coupling_flow(  #
+        #     key=key,
+        #     base_dist=Normal(jnp.zeros(theta_dim)),
+        #     transformer=bij.RationalQuadraticSpline(knots=fc.knots, interval=fc.interval),
+        #     cond_dim=0,
+        #     flow_layers=fc.flow_layers,
+        #     nn_width=fc.nn_width,
+        # ),
         build_posterior_flow=build_post_flow,
         # make_distance=_distance_factory_from_cfg(cfg),
     )
@@ -203,7 +199,6 @@ def main(cfg: Config) -> None:
         mcmc_thinning=cfg.mcmc_thin,
     )
 
-    # --- Reporting ---
     def qtiles(arr: jnp.ndarray) -> tuple[float, float, float]:
         q = jnp.quantile(arr, jnp.array([0.025, 0.5, 0.975]), axis=0)
         return float(q[0]), float(q[1]), float(q[2])
@@ -234,7 +229,7 @@ def main(cfg: Config) -> None:
 
     print("Observed summaries:", res.s_obs)
     print("True parameters:", cfg.theta_true)
-    pseudo_true = (1.17, 1.50, 0.41, 0.23)
+    pseudo_true = (2.3663, 4.1757, 1.7850, 0.1001)
     print(
         "Posterior mean error:",
         jnp.mean(post, axis=0) - jnp.array(pseudo_true),
