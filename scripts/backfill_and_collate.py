@@ -29,7 +29,9 @@ def np_hpdi(x: np.ndarray, alpha: float) -> tuple[np.ndarray, np.ndarray]:
     return lo, hi
 
 
-def np_compute_rep_metrics(samples: np.ndarray, theta_target: np.ndarray, level: float = 0.95) -> dict[str, object]:
+def np_compute_rep_metrics(
+    samples: np.ndarray, theta_target: np.ndarray, level: float = 0.95
+) -> dict[str, object]:
     # samples: (K,D) float; theta_target: (D,)
     alpha = 1.0 - level
     mu = samples.mean(0)
@@ -54,6 +56,13 @@ def np_compute_rep_metrics(samples: np.ndarray, theta_target: np.ndarray, level:
         "width_hpdi": (hi_h - lo_h).tolist(),
         "hit_hpdi": hit_h.astype(int).tolist(),
     }
+
+
+def _key_for(dirp: Path) -> tuple[str, str, str]:
+    """(method, group, seed) from results/gnk/<method>/<group>/seed-XX/<DATE>/"""
+    parts = dirp.parts
+    i = parts.index("gnk")
+    return parts[i + 1].lower(), parts[i + 2], parts[i + 3]
 
 
 @dataclass
@@ -144,76 +153,51 @@ def _fmt_cell(cov, bias, sdbias, avgsd, dc, db):  # type: ignore
 
 def main(a: Args) -> None:
     root = Path(a.results_root)
-    th = np.asarray(a.theta_target, dtype=np.float64)
+    # 0) find level for caption (optional)
+    level = 0.95
+    for mp in root.rglob("metrics.json"):
+        try:
+            level = float(json.load(open(mp))["level"])
+            break
+        except Exception:
+            pass
 
-    # 1) Backfill metrics.json where missing
-    candidates: dict[Path, str] = {}
-    for p in root.rglob("posterior_samples_robust.npz"):
-        candidates[p.parent] = p.name
-    for p in root.rglob("posterior_samples.npz"):
-        candidates.setdefault(p.parent, p.name)  # only if robust absent
-
-    selected: dict[tuple[str, str, str], Path] = {}
-    for d in candidates.keys():
-        parts = d.parts
-        i = parts.index("gnk")  # results/gnk/<method>/<group>/seed-XX/<DATE>
-        method = parts[i + 1]
-        group = parts[i + 2]
-        seed_dir = parts[i + 3]
-        # apply filters
-        n_obs, n_sims, q = _read_run_params(d)
-        if (a.filter_n_obs is not None) and (n_obs != a.filter_n_obs):
+    # 1) Latest-only selection by metrics.json
+    latest: dict[tuple[str, str, str], Path] = {}
+    for mp in root.rglob("metrics.json"):
+        d = mp.parent  # .../seed-XX/<DATE>
+        try:
+            key = _key_for(d)
+        except Exception:
             continue
-        if (a.filter_n_sims is not None) and (n_sims != a.filter_n_sims):
-            continue
-        if (a.filter_q_precond is not None) and (q is not None) and (abs(q - a.filter_q_precond) > 1e-12):
-            continue
-        # keep latest timestamp
-        key = (method, group, seed_dir)
-        if key not in selected or d.name > selected[key].name:
-            selected[key] = d
+        if key not in latest or d.name > latest[key].name:
+            latest[key] = d
 
-    run_dirs = list(selected.values())
+    # 2) Aggregate per method
+    methods = tuple(m.lower() for m in a.methods)
+    by_m = {m: {"bias": [], "psd": [], "hit": []} for m in methods}
 
-    metrics_paths: list[Path] = []
-    for d in run_dirs:
-        mpath = d / "metrics.json"
-        if not mpath.exists():
-            sam = _samples_in(d)
-            if sam is None:
-                continue
-            m = np_compute_rep_metrics(sam, th, a.level)
-            m["theta_target"] = th.tolist()
-            m["method"] = _method_from_dir(d)
-            m["outdir"] = str(d)
-            with open(mpath, "w") as f:
-                json.dump(m, f, indent=2)
-        metrics_paths.append(mpath)
-
-    # 2) Collate
-    by_m: dict[str, dict[str, list[np.ndarray]]] = {m: {"bias": [], "psd": [], "hit": []} for m in a.methods}
-    for mp in metrics_paths:
-        with open(mp) as f:
-            mj = json.load(f)
-        meth = mj.get("method", _method_from_dir(mp.parent))
+    for d in latest.values():
+        meth, _, _ = _key_for(d)
         if meth not in by_m:
             continue
+        mj = json.load(open(d / "metrics.json"))
         by_m[meth]["bias"].append(np.array(mj["bias"], float))
         by_m[meth]["psd"].append(np.array(mj["post_sd"], float))
         hits = np.array(mj.get("hit_hpdi", mj.get("hit_central")), float)
         by_m[meth]["hit"].append(hits)
 
     summary: dict[str, dict[str, list[float] | int]] = {}
-    for meth in a.methods:
-        B = np.stack(by_m[meth]["bias"]) if by_m[meth]["bias"] else None
-        if B is None:
+    for m in methods:
+        if not by_m[m]["hit"]:
             continue
-        S = np.stack(by_m[meth]["psd"])
-        H = np.stack(by_m[meth]["hit"])
+        B = np.stack(by_m[m]["bias"])
+        S = np.stack(by_m[m]["psd"])
+        H = np.stack(by_m[m]["hit"])
         R = B.shape[0]
         cov = H.mean(0)
         se = np.sqrt(cov * (1 - cov) / R)
-        summary[meth] = {
+        summary[m] = {
             "R": R,
             "coverage": cov.tolist(),
             "coverage_se": se.tolist(),
@@ -226,38 +210,41 @@ def main(a: Args) -> None:
     Path(a.out_tex).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out_json).write_text(json.dumps(summary, indent=2))
 
-    # LaTeX
+    # 3) LaTeX
+    def _fmt_cell(cov, bias, sdbias, avgsd, dc, db):
+        return f"{cov:.{dc}f} / {bias:+.{db}f} ± {sdbias:.{db}f} / {avgsd:.{db}f}"
+
     lines = []
     lines.append("\\begin{table}[!htb]")
     lines.append("\\centering")
     lines.append("\\begin{tabular}{@{}l" + "c" * len(a.param_labels) + "@{}}\\toprule")
-    lines.append("Method & " + " & ".join(f"${param_label}$" for param_label in a.param_labels) + " \\\\ \\midrule")
-    for m in a.methods:  # type: ignore
-        if m not in summary:  # type: ignore
+    lines.append(
+        "Method & " + " & ".join(f"${p}$" for p in a.param_labels) + " \\\\ \\midrule"
+    )
+    for m in methods:
+        if m not in summary:
             continue
-        s = summary[m]  # type: ignore
-        cells = []
-        for j in range(len(a.param_labels)):
-            cells.append(
-                _fmt_cell(  # type: ignore
-                    s["coverage"][j],  # type: ignore
-                    s["bias_mean"][j],  # type: ignore
-                    s["bias_sd"][j],  # type: ignore
-                    s["avg_post_sd"][j],  # type: ignore
-                    a.decimals_cov,
-                    a.decimals_bias,
-                )
+        s = summary[m]
+        cells = [
+            _fmt_cell(
+                s["coverage"][j],
+                s["bias_mean"][j],
+                s["bias_sd"][j],
+                s["avg_post_sd"][j],
+                a.decimals_cov,
+                a.decimals_bias,
             )
-        lines.append(m.upper() + " & " + " & ".join(cells) + " \\\\")  # type: ignore
+            for j in range(len(a.param_labels))
+        ]
+        lines.append(m.upper() + " & " + " & ".join(cells) + " \\\\")
     lines.append("\\bottomrule")
     lines.append("\\end{tabular}")
-    pct = int(a.level * 100)
-    cap = (
-        f"Coverage (Cov), bias (Bias), SD of bias, and average posterior SD (AvgSD) for g-and-k. "
-        f"Cells show Cov / Bias $\\pm$ SD / AvgSD. Nominal {pct}\\% HPDI."
+    pct = int(round(level * 100))
+    lines.append(
+        f"\\caption{{Coverage (Cov), bias (Bias), SD of bias, and average posterior SD (AvgSD) for g-and-k. "
+        f"Cells show Cov / Bias $\\pm$ SD / AvgSD. Nominal {pct}\\% HPDI.}}"
     )
-    lines.append(f"\\caption{{{cap}}}")
-    lines.append("\\label{{tab:gnk_coverage}}")
+    lines.append("\\label{tab:gnk_coverage}")
     lines.append("\\end{table}")
     Path(a.out_tex).write_text("\n".join(lines))
 
