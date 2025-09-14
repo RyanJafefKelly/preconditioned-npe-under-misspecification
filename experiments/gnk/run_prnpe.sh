@@ -116,4 +116,8 @@ uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --level 0.95 \
   --want-hpdi \
   --want-central \
-  --method PNPE
+  --method PRNPE
+  --compute-ppd \
+  --ppd-n 1000 \
+  --ppd-metric l2 \
+  --example gnk

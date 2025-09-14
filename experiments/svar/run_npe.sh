@@ -20,7 +20,7 @@ if (( ${#THETA_ARR[@]} != 7 )); then
 fi
 
 : "${N_SIMS:=20000}"
-: "${Q_PRECOND:=0.2}"
+: "${Q_PRECOND:=1.0}"
 
 th_parts=()
 for i in "${!THETA_ARR[@]}"; do
@@ -30,10 +30,9 @@ THETA_TAG=$(IFS=_; echo "${th_parts[*]}")
 
 GROUP="th_${THETA_TAG}-K_${K}-T_${T}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
 
-OUTDIR="results/svar/pnpe/${GROUP}/${DATE}"
+OUTDIR="results/svar/npe/${GROUP}/${DATE}"
 mkdir -p "$OUTDIR"
 
-: "${PRECOND_METHOD:=smc_abc}"
 
 : "${N_POSTERIOR_DRAWS:=20000}"
 
@@ -54,7 +53,6 @@ cmd=(uv run python -m precond_npe_misspec.pipelines.svar_pnpe
   --seed "$SEED"
   --obs_seed "$((10#$SEED + 1234))"
   --outdir "$OUTDIR"
-  --precond_method "$PRECOND_METHOD"
   --theta_true "${THETA_ARR[@]}"
   --k "$K" --T "$T"
   --n_sims "$N_SIMS"
@@ -81,7 +79,7 @@ env | sort > "${OUTDIR}/env.txt"
 
 THETA_TARGET_DEFAULT="0.835 0.382 0.899 0.824 0.172 0.283 0.1286"
 THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"
-THETA_TARGET="${THETA_TARGET//,/ }"
+THETA_TARGET="${THETA_TARGET//,/}"
 read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET"
 
 uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
@@ -90,6 +88,5 @@ uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --level 0.95 \
   --want-hpdi \
   --want-central \
-  --method PNPE
-
+  --method NPE
 

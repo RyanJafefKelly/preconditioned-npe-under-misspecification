@@ -88,4 +88,4 @@ uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --level 0.95 \
   --want-hpdi \
   --want-central \
-  --method PNPE
+  --method NPE

@@ -1,3 +1,4 @@
+# experiments/svar/run_prnpe.sh
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -6,35 +7,35 @@ export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 DATE=$(date +"%Y%m%d-%H%M%S")
 
 : "${SEED:=0}"
+: "${K:=6}"
+: "${T:=1000}"
 
-# GNK specifics
-: "${N_OBS:=5000}"                      # samples in the observed dataset
-THETA_DEFAULT="3.0 1.0 2.0 0.5"        # (A, B, g, k)
+# θ is 7D for k=6. Space-separated ASCII numbers only. No quotes.
+THETA_DEFAULT="0.579 -0.143 0.836 0.745 -0.660 -0.254 0.1"
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
-if (( ${#THETA_ARR[@]} != 4 )); then
-  echo "Error: need 4 values for THETA (A B g k). Got: ${#THETA_ARR[@]}" >&2
+if (( ${#THETA_ARR[@]} != 7 )); then
+  echo "Error: need 7 values for THETA. Got: ${#THETA_ARR[@]}" >&2
   exit 1
 fi
 
-# Preconditioning ABC
+# Preconditioning (ABC)
 : "${N_SIMS:=20000}"
 : "${Q_PRECOND:=1.0}"
 
-GROUP="th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
+th_parts=()
+for i in "${!THETA_ARR[@]}"; do
+  th_parts+=("p$((i+1))${THETA_ARR[$i]}")
+done
+THETA_TAG=$(IFS=_; echo "${th_parts[*]}")
 
-OUTDIR="results/gnk/rnpe/${GROUP}/seed-${SEED}/${DATE}"
+GROUP="th_${THETA_TAG}-K_${K}-T_${T}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
+
+OUTDIR="results/svar/rnpe/${GROUP}/${DATE}"
 mkdir -p "$OUTDIR"
 
-# # Misspecified true DGP (Gaussian mixture) parameters
-# : "${MIX_W:=0.9}"
-# : "${MIX_MU1:=1.0}"
-# : "${MIX_VAR1:=2.0}"
-# : "${MIX_MU2:=7.0}"
-# : "${MIX_VAR2:=2.0}"
 
-
-# Posterior draws
+# Posterior sampling
 : "${N_POSTERIOR_DRAWS:=20000}"
 
 # Flow hyperparameters
@@ -47,14 +48,8 @@ mkdir -p "$OUTDIR"
 : "${MAX_PATIENCE:=10}"
 : "${BATCH_SIZE:=512}"
 
-# Summaries + distance
-: "${SUMMARIES:=octile}"               # octile|duodecile|hexadeciles
-: "${DISTANCE:=euclidean}"             # euclidean|l1|mmd
-: "${MMD_UNBIASED:=0}"
-: "${MMD_BANDWIDTH:=}"                 # empty -> median heuristic
-
-# Denoising model
-: "${DENOISE_MODEL:=spike_slab}" # laplace|laplace_adaptive|student_t|cauchy|spike_slab
+# RNPE denoiser config
+: "${DENOISE_MODEL:=spike_slab}"
 : "${LAPLACE_ALPHA:=0.3}"
 : "${LAPLACE_MIN_SCALE:=0.01}"
 : "${STUDENT_T_SCALE:=0.05}"
@@ -63,17 +58,19 @@ mkdir -p "$OUTDIR"
 : "${SPIKE_STD:=0.01}"
 : "${SLAB_SCALE:=0.25}"
 : "${MISSPECIFIED_PROB:=0.5}"
-: "${LEARN_PROB:=0}"                   # 1 to infer rho
+: "${LEARN_PROB:=0}"             # 1 to enable, else 0
+
+# MCMC config
 : "${MCMC_WARMUP:=1000}"
 : "${MCMC_SAMPLES:=2000}"
 : "${MCMC_THIN:=1}"
 
-cmd=(uv run python -m precond_npe_misspec.pipelines.gnk_prnpe
+cmd=(uv run python -m precond_npe_misspec.pipelines.svar_prnpe
   --seed "$SEED"
   --obs_seed "$((10#$SEED + 1234))"
   --outdir "$OUTDIR"
   --theta_true "${THETA_ARR[@]}"
-  --n_obs "$N_OBS"
+  --k "$K" --T "$T"
   --n_sims "$N_SIMS"
   --q_precond "$Q_PRECOND"
   --n_posterior_draws "$N_POSTERIOR_DRAWS"
@@ -85,11 +82,7 @@ cmd=(uv run python -m precond_npe_misspec.pipelines.gnk_prnpe
   --max_epochs "$MAX_EPOCHS"
   --max_patience "$MAX_PATIENCE"
   --batch_size "$BATCH_SIZE"
-  --summaries "$SUMMARIES"
-  --distance "$DISTANCE"
   --denoise_model "$DENOISE_MODEL"
-  --laplace_alpha "$LAPLACE_ALPHA"
-  --laplace_min_scale "$LAPLACE_MIN_SCALE"
   --student_t_scale "$STUDENT_T_SCALE"
   --student_t_df "$STUDENT_T_DF"
   --cauchy_scale "$CAUCHY_SCALE"
@@ -101,8 +94,7 @@ cmd=(uv run python -m precond_npe_misspec.pipelines.gnk_prnpe
   --mcmc_thin "$MCMC_THIN"
 )
 
-[[ -n "$MMD_BANDWIDTH" ]] && cmd+=(--mmd_bandwidth "$MMD_BANDWIDTH")
-[[ "$MMD_UNBIASED" == "1" ]] && cmd+=(--mmd_unbiased)
+# Toggle boolean flag
 [[ "$LEARN_PROB" == "1" ]] && cmd+=(--learn_prob)
 
 printf '%q ' "${cmd[@]}" | tee "${OUTDIR}/cmd.txt"
@@ -110,13 +102,10 @@ echo
 env | sort > "${OUTDIR}/env.txt"
 "${cmd[@]}" 2>&1 | tee "${OUTDIR}/stdout.log"
 
-THETA_DEFAULT="3.0 1.0 2.0 0.5"        # (A, B, g, k)
-THETA="${THETA:-$THETA_DEFAULT}"
-
-THETA_TARGET_DEFAULT="2.3663 4.1757 1.7850 0.1001"
+THETA_TARGET_DEFAULT="0.835 0.382 0.899 0.824 0.172 0.283 0.1286"
 THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"
-THETA_TARGET="${THETA_TARGET//,/}"              # remove any commas
-read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET" # into array: 4 tokens
+THETA_TARGET="${THETA_TARGET//,/}"
+read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET"
 
 uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --outdir "$OUTDIR" \
