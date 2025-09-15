@@ -35,7 +35,13 @@ qsub -W depend=afterok:$DEP_ID -N gnk_cov_collate \
   -l walltime=00:10:00,mem=2GB,ncpus=1 \
   -- /bin/bash -lc "export PATH=\$HOME/.local/bin:\$PATH; \
     export UV_PROJECT_ENVIRONMENT=\$PBS_O_WORKDIR/.venv; \
-    uv run python -m precond_npe_misspec.scripts.collate_gnk_coverage \
-      --results-root results/gnk --level $LEVEL"
+    uv run python -m precond_npe_misspec.scripts.collate_gnk_metrics \
+      --results-root results/gnk \
+      --level $LEVEL \
+      --out-json results/gnk/metrics_summary.json \
+      --out-cov-tex results/gnk/coverage_table.tex \
+      --out-mse-tex results/gnk/mse_table.tex \
+      --out-ppd-tex results/gnk/ppd_table.tex \
+      --out-synlik-tex results/gnk/synlik_table.tex"
 
 echo "[launcher] submitted collator with dependency on $JOBID"
