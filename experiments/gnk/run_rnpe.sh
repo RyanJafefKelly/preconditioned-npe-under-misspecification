@@ -2,14 +2,14 @@
 set -euo pipefail
 
 export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
-
 DATE=$(date +"%Y%m%d-%H%M%S")
 
 : "${SEED:=0}"
+echo "Test 1"
 
 # GNK specifics
-: "${N_OBS:=5000}"                      # samples in the observed dataset
-THETA_DEFAULT="3.0 1.0 2.0 0.5"        # (A, B, g, k)
+: "${N_OBS:=5000}"
+THETA_DEFAULT="3.0 1.0 2.0 0.5"
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
 if (( ${#THETA_ARR[@]} != 4 )); then
@@ -17,21 +17,12 @@ if (( ${#THETA_ARR[@]} != 4 )); then
   exit 1
 fi
 
-# Preconditioning ABC
+# Training set size (no preconditioning)
 : "${N_SIMS:=20000}"
-: "${Q_PRECOND:=1.0}"
 
-GROUP="th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
-
-OUTDIR="results/gnk/rnpe/${GROUP}/seed-${SEED}/${DATE}"
+OUTDIR="results/gnk/rnpe/th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
-
-# # Misspecified true DGP (Gaussian mixture) parameters
-# : "${MIX_W:=0.9}"
-# : "${MIX_MU1:=1.0}"
-# : "${MIX_VAR1:=2.0}"
-# : "${MIX_MU2:=7.0}"
-# : "${MIX_VAR2:=2.0}"
+echo "Test 2"
 
 
 # Posterior draws
@@ -47,14 +38,8 @@ mkdir -p "$OUTDIR"
 : "${MAX_PATIENCE:=10}"
 : "${BATCH_SIZE:=512}"
 
-# Summaries + distance
-: "${SUMMARIES:=octile}"               # octile|duodecile|hexadeciles
-: "${DISTANCE:=euclidean}"             # euclidean|l1|mmd
-: "${MMD_UNBIASED:=0}"
-: "${MMD_BANDWIDTH:=}"                 # empty -> median heuristic
-
 # Denoising model
-: "${DENOISE_MODEL:=spike_slab}" # laplace|laplace_adaptive|student_t|cauchy|spike_slab
+: "${DENOISE_MODEL:=spike_slab}"  # laplace|laplace_adaptive|student_t|cauchy|spike_slab
 : "${LAPLACE_ALPHA:=0.3}"
 : "${LAPLACE_MIN_SCALE:=0.01}"
 : "${STUDENT_T_SCALE:=0.05}"
@@ -68,55 +53,55 @@ mkdir -p "$OUTDIR"
 : "${MCMC_SAMPLES:=2000}"
 : "${MCMC_THIN:=1}"
 
-cmd=(uv run python -m precond_npe_misspec.pipelines.gnk_prnpe
+echo "Test 3"
+
+
+cmd=(uv run python -m precond_npe_misspec.pipelines.gnk
   --seed "$SEED"
   --obs_seed "$((10#$SEED + 1234))"
   --outdir "$OUTDIR"
   --theta_true "${THETA_ARR[@]}"
   --n_obs "$N_OBS"
-  --n_sims "$N_SIMS"
-  --q_precond "$Q_PRECOND"
-  --n_posterior_draws "$N_POSTERIOR_DRAWS"
-  --flow_layers "$FLOW_LAYERS"
-  --nn_width "$NN_WIDTH"
-  --knots "$KNOTS"
-  --interval "$INTERVAL"
-  --learning_rate "$LEARNING_RATE"
-  --max_epochs "$MAX_EPOCHS"
-  --max_patience "$MAX_PATIENCE"
-  --batch_size "$BATCH_SIZE"
-  --summaries "$SUMMARIES"
-  --distance "$DISTANCE"
-  --denoise_model "$DENOISE_MODEL"
-  --laplace_alpha "$LAPLACE_ALPHA"
-  --laplace_min_scale "$LAPLACE_MIN_SCALE"
-  --student_t_scale "$STUDENT_T_SCALE"
-  --student_t_df "$STUDENT_T_DF"
-  --cauchy_scale "$CAUCHY_SCALE"
-  --spike_std "$SPIKE_STD"
-  --slab_scale "$SLAB_SCALE"
-  --misspecified_prob "$MISSPECIFIED_PROB"
-  --mcmc_warmup "$MCMC_WARMUP"
-  --mcmc_samples "$MCMC_SAMPLES"
-  --mcmc_thin "$MCMC_THIN"
-)
 
-[[ -n "$MMD_BANDWIDTH" ]] && cmd+=(--mmd_bandwidth "$MMD_BANDWIDTH")
-[[ "$MMD_UNBIASED" == "1" ]] && cmd+=(--mmd_unbiased)
-[[ "$LEARN_PROB" == "1" ]] && cmd+=(--learn_prob)
+  --precond.method "none"
+  --precond.n_sims "$N_SIMS"
+
+  --posterior.method "rnpe"
+  --posterior.n_posterior_draws "$N_POSTERIOR_DRAWS"
+
+  --robust.denoise_model "$DENOISE_MODEL"
+  --robust.laplace_alpha "$LAPLACE_ALPHA"
+  --robust.laplace_min_scale "$LAPLACE_MIN_SCALE"
+  --robust.student_t_scale "$STUDENT_T_SCALE"
+  --robust.student_t_df "$STUDENT_T_DF"
+  --robust.cauchy_scale "$CAUCHY_SCALE"
+  --robust.spike_std "$SPIKE_STD"
+  --robust.slab_scale "$SLAB_SCALE"
+  --robust.misspecified_prob "$MISSPECIFIED_PROB"
+
+  --robust.mcmc_warmup "$MCMC_WARMUP"
+  --robust.mcmc_samples "$MCMC_SAMPLES"
+  --robust.mcmc_thin "$MCMC_THIN"
+
+  --flow.flow_layers "$FLOW_LAYERS"
+  --flow.nn_width "$NN_WIDTH"
+  --flow.knots "$KNOTS"
+  --flow.interval "$INTERVAL"
+  --flow.learning_rate "$LEARNING_RATE"
+  --flow.max_epochs "$MAX_EPOCHS"
+  --flow.max_patience "$MAX_PATIENCE"
+  --flow.batch_size "$BATCH_SIZE"
+)
 
 printf '%q ' "${cmd[@]}" | tee "${OUTDIR}/cmd.txt"
 echo
 env | sort > "${OUTDIR}/env.txt"
 "${cmd[@]}" 2>&1 | tee "${OUTDIR}/stdout.log"
 
-THETA_DEFAULT="3.0 1.0 2.0 0.5"        # (A, B, g, k)
-THETA="${THETA:-$THETA_DEFAULT}"
-
 THETA_TARGET_DEFAULT="2.3663 4.1757 1.7850 0.1001"
 THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"
-THETA_TARGET="${THETA_TARGET//,/}"              # remove any commas
-read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET" # into array: 4 tokens
+THETA_TARGET="${THETA_TARGET//,/}"
+read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET"
 
 uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --outdir "$OUTDIR" \

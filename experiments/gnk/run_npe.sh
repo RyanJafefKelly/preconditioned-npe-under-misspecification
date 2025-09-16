@@ -9,7 +9,7 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 
 # GNK specifics
 : "${N_OBS:=5000}"                      # samples in the observed dataset
-THETA_DEFAULT="3.0 1.0 2.0 0.5"        # (A, B, g, k)
+THETA_DEFAULT="3.0 1.0 2.0 0.5"         # (A, B, g, k)
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
 if (( ${#THETA_ARR[@]} != 4 )); then
@@ -17,12 +17,12 @@ if (( ${#THETA_ARR[@]} != 4 )); then
   exit 1
 fi
 
-# Preconditioning ABC
+# Preconditioning
 : "${N_SIMS:=20000}"
+: "${PRECOND_METHOD:=none}"              # none | rejection | smc_abc
 : "${Q_PRECOND:=1.0}"
 
 GROUP="th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
-
 OUTDIR="results/gnk/npe/${GROUP}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
 
@@ -39,48 +39,39 @@ mkdir -p "$OUTDIR"
 : "${MAX_PATIENCE:=10}"
 : "${BATCH_SIZE:=512}"
 
-# Summaries + distance
-: "${SUMMARIES:=hexadeciles}"               # octile|duodecile|hexadeciles
-: "${DISTANCE:=euclidean}"             # euclidean|l1|mmd
-: "${MMD_UNBIASED:=0}"
-: "${MMD_BANDWIDTH:=}"                 # empty -> median heuristic
-
-cmd=(uv run python -m precond_npe_misspec.pipelines.gnk_pnpe
+cmd=(uv run python -m precond_npe_misspec.pipelines.gnk
   --seed "$SEED"
   --obs_seed "$((10#$SEED + 1234))"
   --outdir "$OUTDIR"
   --theta_true "${THETA_ARR[@]}"
   --n_obs "$N_OBS"
-  --n_sims "$N_SIMS"
-  --q_precond "$Q_PRECOND"
-  --n_posterior_draws "$N_POSTERIOR_DRAWS"
-  --flow_layers "$FLOW_LAYERS"
-  --nn_width "$NN_WIDTH"
-  --knots "$KNOTS"
-  --interval "$INTERVAL"
-  --learning_rate "$LEARNING_RATE"
-  --max_epochs "$MAX_EPOCHS"
-  --max_patience "$MAX_PATIENCE"
-  --batch_size "$BATCH_SIZE"
-  --summaries "$SUMMARIES"
-  --distance "$DISTANCE"
-)
 
-[[ -n "$MMD_BANDWIDTH" ]] && cmd+=(--mmd_bandwidth "$MMD_BANDWIDTH")
-[[ "$MMD_UNBIASED" == "1" ]] && cmd+=(--mmd_unbiased)
+  --precond.method "$PRECOND_METHOD"
+  --precond.n_sims "$N_SIMS"
+  --precond.q_precond "$Q_PRECOND"
+
+  --posterior.method "npe"
+  --posterior.n_posterior_draws "$N_POSTERIOR_DRAWS"
+
+  --flow.flow_layers "$FLOW_LAYERS"
+  --flow.nn_width "$NN_WIDTH"
+  --flow.knots "$KNOTS"
+  --flow.interval "$INTERVAL"
+  --flow.learning_rate "$LEARNING_RATE"
+  --flow.max_epochs "$MAX_EPOCHS"
+  --flow.max_patience "$MAX_PATIENCE"
+  --flow.batch_size "$BATCH_SIZE"
+)
 
 printf '%q ' "${cmd[@]}" | tee "${OUTDIR}/cmd.txt"
 echo
 env | sort > "${OUTDIR}/env.txt"
 "${cmd[@]}" 2>&1 | tee "${OUTDIR}/stdout.log"
 
-THETA_DEFAULT="3.0 1.0 2.0 0.5"        # (A, B, g, k)
-THETA="${THETA:-$THETA_DEFAULT}"
-
 THETA_TARGET_DEFAULT="2.3663 4.1757 1.7850 0.1001"
 THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"
-THETA_TARGET="${THETA_TARGET//,/}"              # remove any commas
-read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET" # into array: 4 tokens
+THETA_TARGET="${THETA_TARGET//,/}"
+read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET"
 
 uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --outdir "$OUTDIR" \
