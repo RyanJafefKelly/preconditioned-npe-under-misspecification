@@ -1,7 +1,8 @@
 # src/precond_npe_misspec/utils/metrics.py
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Literal
 
 import jax
 import jax.numpy as jnp
@@ -14,6 +15,14 @@ def _ensure_2d(x: Array) -> Array:
     return x if x.ndim == 2 else x.reshape((-1, 1))
 
 
+def _q(a: Array, q: Array | float, *, axis: int, method: str = "linear") -> Array:
+    """Quantile with JAX API compatibility."""
+    try:
+        return jnp.quantile(a, q, axis=axis, method=method)  # jax>=0.4.12
+    except TypeError:  # older JAX
+        return jnp.quantile(a, q, axis=axis, interpolation=method)
+
+
 def posterior_mean_sd(samples: Array) -> tuple[Array, Array]:
     s = _ensure_2d(samples)  # (K,D)
     mu = jnp.mean(s, axis=0)  # (D,)
@@ -24,7 +33,8 @@ def posterior_mean_sd(samples: Array) -> tuple[Array, Array]:
 def central_ci(samples: Array, alpha: float = 0.05) -> tuple[Array, Array]:
     """Quantile CI per dimension. samples: (K,D). Returns lo, hi shape (D,)."""
     s = _ensure_2d(samples)
-    lo, hi = jnp.quantile(s, jnp.array([alpha / 2, 1.0 - alpha / 2]), axis=0, method="linear")
+    lo, hi = _q(s, jnp.array([alpha / 2, 1.0 - alpha / 2]), axis=0, method="linear")
+
     return lo, hi
 
 
@@ -75,9 +85,15 @@ def compute_rep_metrics(
 
     mu, sd = posterior_mean_sd(s)
     bias = mu - th
+    var = jnp.square(sd)
+    se_mean = jnp.square(bias)  # squared error of posterior mean
+    post_mse = var + jnp.square(bias)  # E[(θ-θ†)^2 | posterior]
+
     out["post_mean"] = mu.tolist()
     out["post_sd"] = sd.tolist()
     out["bias"] = bias.tolist()
+    out["se_mean"] = se_mean.tolist()
+    out["post_mse"] = post_mse.tolist()
 
     if want_central:
         lo, hi = central_ci(posterior_samples, alpha)
@@ -92,10 +108,44 @@ def compute_rep_metrics(
         out["hit_hpdi"] = covered(lo, hi, th).tolist()
 
     if (logpdf_samples is not None) and (logpdf_at_theta is not None):
-        t = jnp.quantile(jnp.asarray(logpdf_samples), alpha, method="linear")  # e.g., 5th pct for 95% set
+        # e.g., 5th pct for 95% set
+        t = _q(jnp.asarray(logpdf_samples), alpha, axis=0, method="linear")
         out["joint_hpd_hit"] = bool(jnp.asarray(logpdf_at_theta) >= t)
 
     return out
+
+
+def posterior_predictive_distance_on_summaries(
+    *,
+    key: Array,
+    theta_samples: Array,  # (K, Dθ)
+    simulate: Callable[[Array, Array, int], Array],
+    summaries: Callable[[Array], Array],
+    s_obs: Array,
+    n_obs: int,
+    n_rep: int = 1000,
+    metric: Literal["l2", "l1"] = "l2",
+) -> dict[str, Any]:
+    """Sample y~p(y|θ), θ~posterior; distance between s(y) and s_obs."""
+    K = theta_samples.shape[0]
+    key_idx, key_sim = jax.random.split(key)
+    idx = jax.random.randint(key_idx, (n_rep,), minval=0, maxval=K)
+    th = theta_samples[idx]
+    keys = jax.random.split(key_sim, n_rep)
+
+    def _one(kk: Array, t: Array) -> Array:
+        y = simulate(kk, t, n_obs)
+        s = summaries(y)
+        d = s - s_obs
+        return jnp.linalg.norm(d, ord=2) if metric == "l2" else jnp.sum(jnp.abs(d))
+
+    dists = jax.vmap(_one)(keys, th)
+    return {
+        "ppd_mean": float(jnp.mean(dists)),
+        "ppd_sd": float(jnp.std(dists, ddof=1)),
+        "ppd_q50": float(jnp.quantile(dists, 0.5)),
+        "ppd_q90": float(jnp.quantile(dists, 0.9)),
+    }
 
 
 if __name__ == "__main__":
