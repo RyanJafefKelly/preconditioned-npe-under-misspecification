@@ -45,7 +45,8 @@ printf '%q ' "${cmd[@]}" | tee "${OUTDIR}/cmd.txt"; echo
 env | sort > "${OUTDIR}/env.txt"
 "${cmd[@]}" 2>&1 | tee "${OUTDIR}/stdout.log"
 
-THETA_TARGET_DEFAULT="0.835 0.382 0.899 0.824 0.172 0.283 0.1286"
+# THETA_TARGET_DEFAULT="0.835 0.382 0.899 0.824 0.172 0.283 0.1286"
+THETA_TARGET_DEFAULT="0.579 -0.143 0.836 0.745 -0.660 -0.254 0.1"
 THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"; THETA_TARGET="${THETA_TARGET//,/}"; read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET"
 
 cat > "$OUTDIR/entrypoints.json" <<EOF
