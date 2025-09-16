@@ -29,9 +29,7 @@ def np_hpdi(x: np.ndarray, alpha: float) -> tuple[np.ndarray, np.ndarray]:
     return lo, hi
 
 
-def np_compute_rep_metrics(
-    samples: np.ndarray, theta_target: np.ndarray, level: float = 0.95
-) -> dict[str, object]:
+def np_compute_rep_metrics(samples: np.ndarray, theta_target: np.ndarray, level: float = 0.95) -> dict[str, object]:
     # samples: (K,D) float; theta_target: (D,)
     alpha = 1.0 - level
     mu = samples.mean(0)
@@ -218,9 +216,7 @@ def main(a: Args) -> None:
     lines.append("\\begin{table}[!htb]")
     lines.append("\\centering")
     lines.append("\\begin{tabular}{@{}l" + "c" * len(a.param_labels) + "@{}}\\toprule")
-    lines.append(
-        "Method & " + " & ".join(f"${p}$" for p in a.param_labels) + " \\\\ \\midrule"
-    )
+    lines.append("Method & " + " & ".join(f"${p}$" for p in a.param_labels) + " \\\\ \\midrule")
     for m in methods:
         if m not in summary:
             continue
