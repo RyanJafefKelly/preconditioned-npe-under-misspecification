@@ -14,6 +14,39 @@ type Array = jax.Array
 type PRNGKey = Array  # PRNG key array (uint32[2])
 
 
+def prior_logpdf(
+    theta: ArrayLike,
+    A_min: float = 0.0,
+    A_max: float = 10.0,
+    B_min: float = 0.0,
+    B_max: float = 10.0,
+    g_min: float = 0.0,
+    g_max: float = 10.0,
+    k_min: float = 0.0,
+    k_max: float = 10.0,
+) -> Array:
+    """Log p(θ) for independent Uniforms on (A,B,g,k).
+    Vectorised over leading dims. Returns 0 on support, −inf outside.
+    """
+    th = jnp.asarray(theta)
+    if th.shape[-1] != 4:
+        raise ValueError("theta must have last dimension 4: (A,B,g,k).")
+    A, B, g, k = th[..., 0], th[..., 1], th[..., 2], th[..., 3]
+    in_box = (
+        (A_min <= A)
+        & (A <= A_max)
+        & (B_min <= B)
+        & (B <= B_max)
+        & (g_min <= g)
+        & (g <= g_max)
+        & (k_min <= k)
+        & (k <= k_max)
+    )
+    zero = jnp.zeros_like(A, dtype=th.dtype)
+    neg_inf = jnp.full_like(A, -jnp.inf, dtype=th.dtype)
+    return jnp.where(in_box, zero, neg_inf)
+
+
 def gnk(
     z: ArrayLike,
     A: ArrayLike,
@@ -65,6 +98,11 @@ def ss_octile(y: ArrayLike) -> Array:
 def true_dgp(
     key: PRNGKey,
     n_obs: int,
+    # w: float = 0.1,
+    # mu1: float = 3.0,
+    # var1: float = 2.0,
+    # mu2: float = 20.0,
+    # var2: float = 16.0,
     w: float = 0.6,
     mu1: float = 1.0,
     var1: float = 2.0,

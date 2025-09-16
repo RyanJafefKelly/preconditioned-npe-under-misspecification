@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import cast
 
 import jax
 import jax.numpy as jnp
@@ -21,6 +22,14 @@ EPS = 1e-8
 
 def prior_sample(key: Array) -> jnp.ndarray:
     lo, hi = theta_bounds_3d()
+    u = jax.random.uniform(key, shape=(3,))
+    return lo + u * (hi - lo)  # (θ2, θ3, θ4)
+
+
+def wide_prior_sample(key: Array) -> jnp.ndarray:
+    # lo, hi = theta_bounds_3d()
+    lo = jnp.array([-0.0, 0.0, 1.0], dtype=jnp.float32)
+    hi = jnp.array([5.0, 10.0, 5.0], dtype=jnp.float32)
     u = jax.random.uniform(key, shape=(3,))
     return lo + u * (hi - lo)  # (θ2, θ3, θ4)
 
@@ -93,7 +102,7 @@ def _stable_rvs(key: Array, alpha: Array, beta: float, shape: tuple[int, ...]) -
         X1 = S * part1 * part2  # S1 variate
         return X1 - zeta  # S1→S0 shift (β tan(πα/2) = zeta)
 
-    return lax.cond(jnp.isclose(alpha, 1.0), _alpha_eq1, _alpha_ne1, operand=None)
+    return cast(Array, lax.cond(jnp.isclose(alpha, 1.0), _alpha_eq1, _alpha_ne1, operand=None))
 
 
 # -----------------------------
@@ -116,7 +125,7 @@ def assumed_dgp(
     nu = jax.random.normal(k_z, (T,))
 
     # log-variance AR(1)
-    def step(z_prev, e):  # type: ignore
+    def step(z_prev: Array, e: Array) -> tuple[Array, Array]:
         z_t = theta1 + theta2 * z_prev + theta3 * e
         return z_t, z_t
 
@@ -146,10 +155,11 @@ true_dgp = assumed_dgp
 # Model: r_t = x_t ε_t;  x_t = β1 + β2 x_{t-1}|ε_{t-1}| + β3 x_{t-1};  ε_t ~ t_ν (std.)
 # Summaries are ∂L/∂β_j / T at a fixed β (typically β̂(y_obs)); pass β via a closure.
 # -----------------------------
-def _student_t_logpdf(eps: jnp.ndarray, nu: float) -> jnp.ndarray:
+def _student_t_logpdf(eps: Array, nu: float | Array) -> Array:
     """Log-pdf of unit-variance Student-t_ν.  Var=1 => scale s^2=(nu-2)/nu."""
-    c = gammaln((nu + 1.0) / 2.0) - gammaln(nu / 2.0) - 0.5 * (jnp.log(jnp.pi) + jnp.log(nu - 2.0))
-    return c - 0.5 * (nu + 1.0) * jnp.log1p((eps * eps) / (nu - 2.0))
+    nu_arr = jnp.asarray(nu)
+    c = gammaln((nu_arr + 1.0) / 2.0) - gammaln(nu_arr / 2.0) - 0.5 * (jnp.log(jnp.pi) + jnp.log(nu_arr - 2.0))
+    return c - 0.5 * (nu_arr + 1.0) * jnp.log1p((eps * eps) / (nu_arr - 2.0))
 
 
 @jax.jit  # type: ignore
@@ -182,7 +192,7 @@ def make_summaries(aux_beta: jnp.ndarray) -> Callable[[jnp.ndarray], jnp.ndarray
 
     def summaries(y: jnp.ndarray) -> jnp.ndarray:
         g = jax.grad(lambda b: _garch_t_avg_loglik(y, b))
-        return g(aux_beta)  # shape (4,)
+        return g(aux_beta)
 
     return summaries
 
