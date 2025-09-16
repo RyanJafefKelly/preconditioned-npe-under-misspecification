@@ -42,52 +42,22 @@ def _default_summaries_flow_builder(
 def fit_s_flow(
     key: Array,
     s_dim: int,
-    S_train: jnp.ndarray,
+    S_train_w: jnp.ndarray,  # <-- whitened input
     flow_cfg: Any,
 ) -> tuple[eqx.Module, list[float]]:
-    """
-    Fit an unconditional flow q(s) on whitened summaries S_train.
-    Returns (s_flow, losses). Whitening stats are internal.
-    """
-    # TODO: NOW ASSUMING PASSED IN WHITENED SUMMARIES
-    S_mean = jnp.mean(S_train, 0)
-    S_std = jnp.std(S_train, 0) + EPS
-    S_proc = _standardise(S_train, S_mean, S_std)
-
     k_build, k_fit = jax.random.split(key)
     s_flow0 = _default_summaries_flow_builder(s_dim)(k_build, flow_cfg)
-
     s_flow_fit, losses_any = fit_to_data(
         key=k_fit,
         dist=s_flow0,
-        data=S_proc,
+        data=S_train_w,
         learning_rate=flow_cfg.learning_rate,
         max_epochs=flow_cfg.max_epochs,
         max_patience=flow_cfg.max_patience,
         batch_size=flow_cfg.batch_size,
         show_progress=True,
     )
-    losses_s = cast(list[float], losses_any)
-
-    # Bind whitening stats into the model so it expects whitened inputs consistent with training.
-    # We wrap by composing an Affine to map raw s -> whitened s seen by s_flow_fit.
-    # y = (s - mean)/std  => y = A*s + b with A=1/std, b=-mean/std.
-    class _WhitenedSummaries(eqx.Module):  # type: ignore[misc]
-        base: eqx.Module
-        mean: Array
-        std: Array
-
-        def log_prob(self, s: Array) -> Array:
-            y = (s - self.mean) / self.std
-            base_lp = cast(Array, self.base.log_prob(y))
-            return base_lp - jnp.sum(jnp.log(self.std))
-
-        def sample(self, key: Array, shape: tuple[int, ...]) -> Array:
-            y = cast(Array, self.base.sample(key, shape))
-            return y * self.std + self.mean
-
-    s_flow_wrapped = _WhitenedSummaries(base=s_flow_fit, mean=S_mean, std=S_std)
-    return s_flow_wrapped, losses_s
+    return s_flow_fit, cast(list[float], losses_any)
 
 
 def denoise_s(

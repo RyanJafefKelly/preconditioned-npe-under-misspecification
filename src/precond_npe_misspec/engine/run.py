@@ -4,10 +4,12 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from pathlib import Path as _Path
 from typing import Any, Literal
 
 import jax
 import jax.numpy as jnp
+import numpy as _np
 
 from precond_npe_misspec.utils.artifacts import save_artifacts
 
@@ -18,7 +20,7 @@ from .robust import denoise_s, fit_s_flow, sample_robust_posterior
 
 @dataclass(frozen=True)
 class PrecondConfig:
-    method: Literal["none", "rejection", "smc_abc"] = "none"
+    method: Literal["none", "rejection", "smc_abc"] = "smc_abc"
     n_sims: int = 200_000
     q_precond: float = 0.2
     # SMC‑ABC
@@ -35,7 +37,7 @@ class PrecondConfig:
 
 @dataclass(frozen=True)
 class PosteriorConfig:
-    method: Literal["npe", "rnpe"] = "npe"
+    method: Literal["npe", "rnpe"] = "rnpe"
     n_posterior_draws: int = 20_000
 
 
@@ -82,6 +84,9 @@ class Result:
     th_std_post: jnp.ndarray
     posterior_samples_at_obs: jnp.ndarray
     loss_history_theta: Any
+    # Robust extras (RNPE/PRNPE)
+    denoised_s_samples: jnp.ndarray | None = None
+    misspec_probs: jnp.ndarray | None = None
 
 
 def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
@@ -100,6 +105,8 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
     rng, k_fit = jax.random.split(rng)
     q_theta_s, S_mean, S_std, th_mean, th_std, losses_theta = fit_posterior_flow(k_fit, spec, theta_tr, S_tr, flow_cfg)
     s_obs_w = (s_obs - S_mean) / (S_std + 1e-8)
+    S_tr_w = (S_tr - S_mean) / (S_std + 1e-8)
+    print("s_obs_w: ", s_obs_w)
 
     # NPE sampling
     if run.posterior.method == "npe":
@@ -122,9 +129,29 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
     else:
         # RNPE: fit q(s), denoise, then mix q(theta|s)
         rng, k_sfit = jax.random.split(rng)
-        q_s, _ = fit_s_flow(k_sfit, spec.s_dim, S_tr, flow_cfg)
+        q_s_w, _ = fit_s_flow(k_sfit, spec.s_dim, S_tr_w, flow_cfg)
         rng, k_mcmc = jax.random.split(rng)
-        s_denoised_w, misspec_probs = denoise_s(k_mcmc, s_obs_w, q_s, run.robust)
+        print("q_s.log_prob(raw s_obs)   :", float(q_s_w.log_prob(s_obs)))
+        print(
+            "q_s.log_prob(whitened s_obs_w) (WRONG SCALE):",
+            float(q_s_w.log_prob(s_obs_w)),
+        )  # should be ~ -inf or very small
+
+        s_denoised_w, misspec_probs = denoise_s(k_mcmc, s_obs_w, q_s_w, run.robust)
+        print("s_denoised_w: ", s_denoised_w)
+        print("misspec_probs: ", misspec_probs)
+        resid = jnp.mean((s_denoised_w - s_obs_w) ** 2)
+        print("MSE(denoised_w, obs_w):", float(resid))
+
+        if run.outdir:
+            _od = _Path(run.outdir)
+            _od.mkdir(parents=True, exist_ok=True)
+            # Save all denoised samples (M, s_dim) and their mean context vector (s_dim,)
+            _np.savez_compressed(_od / "denoised_s_samples.npz", samples=_np.asarray(s_denoised_w))
+            _np.save(_od / "s_obs_denoised_w.npy", _np.asarray(s_denoised_w).mean(axis=0))
+            if misspec_probs is not None:
+                _np.save(_od / "misspec_probs.npy", _np.asarray(misspec_probs))
+
         rng, k_mix = jax.random.split(rng)
         theta_samps_robust = sample_robust_posterior(k_mix, q_theta_s, s_denoised_w, run.posterior.n_posterior_draws)
         res = Result(
@@ -139,6 +166,8 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             th_std_post=th_std,
             posterior_samples_at_obs=theta_samps_robust,  # for metrics compatibility
             loss_history_theta=losses_theta,
+            denoised_s_samples=s_denoised_w,
+            misspec_probs=misspec_probs,
         )
 
     # Persist artefacts for metrics script
