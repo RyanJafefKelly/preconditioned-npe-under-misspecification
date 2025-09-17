@@ -84,14 +84,18 @@ def _stable_rvs(key: Array, alpha: Array, beta: float, shape: tuple[int, ...]) -
     """
     eps = 1e-12
     key_u, key_w = jax.random.split(key)
-    U = jax.random.uniform(key_u, shape=shape, minval=-jnp.pi / 2.0 + eps, maxval=jnp.pi / 2.0 - eps)
+    U = jax.random.uniform(
+        key_u, shape=shape, minval=-jnp.pi / 2.0 + eps, maxval=jnp.pi / 2.0 - eps
+    )
     W = jax.random.exponential(key_w, shape=shape)
 
     def _alpha_eq1(_: None) -> Array:
         denom = (jnp.pi / 2.0) + beta * U
         term = ((jnp.pi / 2.0) * W * jnp.cos(U)) / jnp.clip(denom, a_min=eps)
         # log term is clipped, not shifted by +EPS
-        return (2.0 / jnp.pi) * (denom * jnp.tan(U) - beta * jnp.log(jnp.clip(term, a_min=eps)))
+        return (2.0 / jnp.pi) * (
+            denom * jnp.tan(U) - beta * jnp.log(jnp.clip(term, a_min=eps))
+        )
 
     def _alpha_ne1(_: None) -> Array:
         zeta = beta * jnp.tan(jnp.pi * alpha / 2.0)
@@ -102,7 +106,9 @@ def _stable_rvs(key: Array, alpha: Array, beta: float, shape: tuple[int, ...]) -
         X1 = S * part1 * part2  # S1 variate
         return X1 - zeta  # S1→S0 shift (β tan(πα/2) = zeta)
 
-    return cast(Array, lax.cond(jnp.isclose(alpha, 1.0), _alpha_eq1, _alpha_ne1, operand=None))
+    return cast(
+        Array, lax.cond(jnp.isclose(alpha, 1.0), _alpha_eq1, _alpha_ne1, operand=None)
+    )
 
 
 # -----------------------------
@@ -158,7 +164,11 @@ true_dgp = assumed_dgp
 def _student_t_logpdf(eps: Array, nu: float | Array) -> Array:
     """Log-pdf of unit-variance Student-t_ν.  Var=1 => scale s^2=(nu-2)/nu."""
     nu_arr = jnp.asarray(nu)
-    c = gammaln((nu_arr + 1.0) / 2.0) - gammaln(nu_arr / 2.0) - 0.5 * (jnp.log(jnp.pi) + jnp.log(nu_arr - 2.0))
+    c = (
+        gammaln((nu_arr + 1.0) / 2.0)
+        - gammaln(nu_arr / 2.0)
+        - 0.5 * (jnp.log(jnp.pi) + jnp.log(nu_arr - 2.0))
+    )
     return c - 0.5 * (nu_arr + 1.0) * jnp.log1p((eps * eps) / (nu_arr - 2.0))
 
 
@@ -166,7 +176,9 @@ def _student_t_logpdf(eps: Array, nu: float | Array) -> Array:
 def _garch_t_avg_loglik(r: Array, beta: Array) -> Array:
     b1, b2, b3, nu = beta[0], beta[1], beta[2], beta[3]
 
-    def step(carry: tuple[Array, Array], rt: Array) -> tuple[tuple[Array, Array], Array]:
+    def step(
+        carry: tuple[Array, Array], rt: Array
+    ) -> tuple[tuple[Array, Array], Array]:
         x_prev, eps_prev = carry
         x_t = b1 + b2 * x_prev * jnp.abs(eps_prev) + b3 * x_prev
         x_t = jnp.maximum(x_t, 1e-8)
@@ -284,7 +296,10 @@ def summaries_for_metrics(y: jnp.ndarray) -> jnp.ndarray:
         0.0,
     )
     lev = _corr(z[:-1], jnp.abs(z[1:])) if z.size > 1 else jnp.asarray(0.0, z.dtype)
-    return jnp.array([jnp.log(mad), acf1, acf5, tail_ratio, p35, me2, lev], dtype=jnp.float32)
+    summaries = jnp.array(
+        [jnp.log(mad), acf1, acf5, tail_ratio, p35, me2, lev], dtype=jnp.float32
+    )
+    return summaries
 
 
 def simulate(
