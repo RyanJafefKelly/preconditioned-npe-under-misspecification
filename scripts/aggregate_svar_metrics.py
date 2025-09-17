@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -73,6 +74,23 @@ def _read_json(path: Path) -> dict[str, Any]:
         return cast(dict[str, Any], json.load(f))
 
 
+def _flatten(d: Any, prefix: str = "") -> dict[str, Any]:
+    """Flatten nested dict/list structures to dotted key paths."""
+    out: dict[str, Any] = {}
+    if isinstance(d, dict):
+        for k, v in d.items():
+            key = f"{prefix}.{k}" if prefix else str(k)
+            out.update(_flatten(v, key))
+    elif isinstance(d, list):
+        # Keep lists; often numeric vectors
+        out[prefix] = d
+        for i, v in enumerate(d):
+            out.update(_flatten(v, f"{prefix}[{i}]"))
+    else:
+        out[prefix] = d
+    return out
+
+
 def _get_first(d: dict[str, Any], *candidates: str, default=None):  # type: ignore
     for k in candidates:
         if k in d:
@@ -125,94 +143,172 @@ def _find_theta_labels(run_dir: Path, theta_dim: int) -> list[str]:
     return list(labels)
 
 
+def _first_array_from_npz(path: Path) -> np.ndarray | None:
+    if not path.exists():
+        return None
+    with np.load(path, allow_pickle=False) as data:
+        if "samples" in data.files:
+            return np.asarray(data["samples"])
+        # Fallback: first array entry
+        for k in data.files:
+            arr = np.asarray(data[k])
+            if arr.ndim >= 1:
+                return arr
+    return None
+
+
+def _get_theta_target(
+    run_dir: Path, flat_md: dict[str, Any], theta_dim: int
+) -> np.ndarray | None:
+    # Look in metrics.json first (various spellings)
+    for key in flat_md:
+        lk = key.lower()
+        if any(
+            tk in lk
+            for tk in (
+                "theta_target",
+                "theta.dagger",
+                "theta_dagger",
+                "target_theta",
+                "theta*",
+            )
+        ) and isinstance(flat_md[key], (list, tuple)):
+            arr = np.asarray(flat_md[key], dtype=float).reshape(-1)
+            if arr.size == theta_dim:
+                return arr
+    # Fallback: config.json → run_cfg.theta_true
+    cfg = run_dir / "config.json"
+    if cfg.exists():
+        try:
+            jd = _read_json(cfg)
+            flat = _flatten(jd)
+            for key, val in flat.items():
+                lk = key.lower()
+                if "run_cfg.theta_true" in lk.replace(" ", "") and isinstance(
+                    val, (list, tuple)
+                ):
+                    arr = np.asarray(val, dtype=float).reshape(-1)
+                    if arr.size == theta_dim:
+                        return arr
+        except Exception:
+            pass
+    return None
+
+
+def _hpdi_contains(x: np.ndarray, target: float, level: float) -> float:
+    x = np.sort(np.asarray(x, dtype=float).reshape(-1))
+    n = x.size
+    if n == 0:
+        return np.nan
+    k = int(np.ceil(level * n))
+    widths = x[k - 1 :] - x[: n - k + 1]
+    j = int(np.argmin(widths))
+    lo = x[j]
+    hi = x[j + k - 1]
+    return float(lo <= target <= hi)
+
+
+def _central_contains(x: np.ndarray, target: float, level: float) -> float:
+    a = (1.0 - level) / 2.0
+    lo = float(np.quantile(x, a))
+    hi = float(np.quantile(x, 1.0 - a))
+    return float(lo <= target <= hi)
+
+
+def _coverage_and_mse_from_samples(
+    samples: np.ndarray, theta_target: np.ndarray, level: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    samples: (N, D), theta_target: (D,)
+    returns: hpdi_cov (D,), central_cov (D,), mse (D,)
+    """
+    if samples.ndim != 2:
+        raise ValueError("samples must be (N, D)")
+    N, D = samples.shape
+    hpdi = np.zeros(D, dtype=float)
+    cent = np.zeros(D, dtype=float)
+    mse = ((samples - theta_target[None, :]) ** 2).mean(axis=0)
+    for d in range(D):
+        col = samples[:, d]
+        hpdi[d] = _hpdi_contains(col, float(theta_target[d]), level)
+        cent[d] = _central_contains(col, float(theta_target[d]), level)
+    return hpdi, cent, mse
+
+
 # ---------------------- Metrics parsing ---------------------
 
 
 def _parse_metrics(md: dict[str, Any]) -> dict[str, Any]:
-    """Return dict with keys: hpdi_cov, central_cov, bias, mse, logprob, ppd_median."""
-    out: dict[str, Any] = {}
+    """Schema-agnostic parse. Returns: hpdi_cov, central_cov, bias, mse, logprob, ppd_median."""
+    out: Dict[str, Any] = {}
+    flat = _flatten(md)
+    flat_l = {k.lower(): v for k, v in flat.items()}
 
-    # coverage vectors (per-parameter)
-    hpdi_cov = _coerce_bool_array(
-        _get_first(
-            md,
-            "coverage_hpdi",
-            "hpdi_coverage",
-            "hpdi_contains",
-            "hpdi_cover",
-            "contains_hpdi",
-        )
-    ) or _coerce_bool_array(_get_first(md.get("coverage", {}), "hpdi", default=None))
-    central_cov = _coerce_bool_array(
-        _get_first(
-            md,
-            "coverage_central",
-            "central_coverage",
-            "central_contains",
-            "contains_central",
-        )
-    ) or _coerce_bool_array(_get_first(md.get("coverage", {}), "central", default=None))
+    def _find_vec(
+        keys_any: Iterable[str], keys_all: Iterable[str] = (), length_at_least: int = 1
+    ) -> np.ndarray | None:
+        for k, v in flat_l.items():
+            if not isinstance(v, (list, tuple, np.ndarray)):
+                continue
+            s = k
+            if any(a in s for a in keys_any) and all(a in s for a in keys_all):
+                arr = np.asarray(v)
+                if arr.size >= length_at_least and arr.ndim >= 1:
+                    return arr.astype(float).reshape(-1)
+        return None
 
-    # bias and mse vectors
-    bias = _as_float_array(_get_first(md, "bias", "param_bias", "theta_bias"))
-    mse = _as_float_array(_get_first(md, "mse", "param_mse", "theta_mse"))
+    def _find_scalar(keys_all: Iterable[str]) -> Optional[float]:
+        best = None
+        for k, v in flat_l.items():
+            if isinstance(v, (int, float)) and all(a in k for a in keys_all):
+                best = float(v)
+        return best
 
-    # scalars
-    logprob = _get_first(
-        md,
-        "log_prob_at_target",
-        "logprob_at_target",
-        "synlik_at_target",
-        "log_q_at_theta_target",
-        "log_density_at_target",
+    # coverage
+    hpdi_cov = (
+        _coerce_bool_array(_find_vec(keys_any=("hpdi",), keys_all=("cover",)))
+        or _coerce_bool_array(_find_vec(keys_any=("hpdi",), keys_all=("contains",)))
+        or _coerce_bool_array(_find_vec(keys_any=("coverage", "hpdi"), keys_all=()))
     )
-    logprob = None if logprob is None else float(logprob)
+    central_cov = (
+        _coerce_bool_array(_find_vec(keys_any=("central",), keys_all=("cover",)))
+        or _coerce_bool_array(_find_vec(keys_any=("central",), keys_all=("contains",)))
+        or _coerce_bool_array(_find_vec(keys_any=("coverage", "central"), keys_all=()))
+    )
 
-    # posterior predictive distance (median)
-    candidates = []
-    for k, v in md.items():
-        if isinstance(v, (int, float)):
-            continue
-        if isinstance(v, dict):
-            # look for nested summaries
-            # e.g., {"ppd": {"l2": {"median": ...}}}
-            ppd = v
-            if "ppd" in k:
-                candidates.append(v)
-        # flat keys like "ppd_distance_median", "ppd_l2_median"
-        if isinstance(v, (int, float)) and "ppd" in k and "median" in k:
-            out["ppd_median"] = float(v)
-    if "ppd_median" not in out:
-        # common flat keys
-        v = _get_first(md, "ppd_distance_median", "ppd_l2_median", "ppd_median")
+    # bias and MSE vectors
+    bias = _as_float_array(_find_vec(keys_any=("bias",), keys_all=()))
+    mse = _as_float_array(
+        _find_vec(keys_any=("mse", "mean_squared", "squared_error"), keys_all=())
+    )
+
+    # log-probability at target
+    logprob = _find_scalar(keys_all=("log",))  # broad
+    # prefer target-specific keys if present
+    for keys in (
+        ("log", "prob", "target"),
+        ("log", "density", "target"),
+        ("synlik", "target"),
+    ):
+        v = _find_scalar(keys_all=keys)
         if v is not None:
-            out["ppd_median"] = float(v)
-        else:
-            # nested search
-            def _search_median(d: dict[str, Any]) -> float | None:
-                # depth-limited search for a "median" under something that smells like distance
-                for kk, vv in d.items():
-                    if isinstance(vv, dict):
-                        m = _search_median(vv)
-                        if m is not None:
-                            return m
-                    else:
-                        if "median" in kk and isinstance(vv, (int, float)):
-                            return float(vv)
-                return None
+            logprob = v
+            break
 
-            for cand in candidates:
-                m = _search_median(cand)
-                if m is not None:
-                    out["ppd_median"] = m
-                    break
+    # posterior predictive distance median
+    ppd_median = None
+    for keys in (("ppd", "median"), ("ppd", "l2", "median"), ("ppc", "median")):
+        v = _find_scalar(keys_all=keys)
+        if v is not None:
+            ppd_median = v
+            break
 
     out["hpdi_cov"] = hpdi_cov
     out["central_cov"] = central_cov
     out["bias"] = bias
     out["mse"] = mse
     out["logprob"] = logprob
-    out["ppd_median"] = out.get("ppd_median", None)
+    out["ppd_median"] = ppd_median
     return out
 
 
@@ -294,6 +390,37 @@ def _aggregate(args: Args) -> None:
                     )
                 if labels is None:
                     labels = _find_theta_labels(run_dir, theta_dim)
+
+            # Fallback: compute coverage/MSE from saved posterior samples if missing
+            need_cov = not isinstance(
+                parsed.get("hpdi_cov"), np.ndarray
+            ) or not isinstance(parsed.get("central_cov"), np.ndarray)
+            need_mse = not isinstance(parsed.get("mse"), np.ndarray)
+            if need_cov or need_mse:
+                # try to load samples
+                samps = _first_array_from_npz(run_dir / "posterior_samples.npz")
+                if samps is None:
+                    samps = _first_array_from_npz(
+                        run_dir / "posterior_samples_robust.npz"
+                    )
+                if (
+                    samps is not None
+                    and samps.ndim == 2
+                    and samps.shape[1] == theta_dim
+                ):
+                    tgt = _get_theta_target(run_dir, _flatten(md), theta_dim)
+                    if tgt is not None:
+                        hpdi_v, cent_v, mse_v = _coverage_and_mse_from_samples(
+                            samps, tgt, args.level
+                        )
+                        if need_cov:
+                            parsed["hpdi_cov"] = hpdi_v
+                            parsed["central_cov"] = cent_v
+                        if need_mse:
+                            parsed["mse"] = mse_v
+                else:
+                    if args.verbose:
+                        print(f"[info] samples not found or bad shape in {run_dir}")
 
             # push arrays if shapes match
             def _push(dst: dict[str, list[np.ndarray]], key: str):
