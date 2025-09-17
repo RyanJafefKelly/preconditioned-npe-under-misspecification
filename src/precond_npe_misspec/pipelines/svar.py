@@ -8,13 +8,9 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from precond_npe_misspec.engine.run import (
-    PosteriorConfig,
-    PrecondConfig,
-    RobustConfig,
-    RunConfig,
-    run_experiment,
-)
+from precond_npe_misspec.engine.run import (PosteriorConfig, PrecondConfig,
+                                            RobustConfig, RunConfig,
+                                            run_experiment)
 from precond_npe_misspec.examples.svar import assumed_dgp as svar_assumed_dgp
 from precond_npe_misspec.examples.svar import default_pairs
 from precond_npe_misspec.examples.svar import prior_logpdf as svar_prior_logpdf
@@ -22,10 +18,7 @@ from precond_npe_misspec.examples.svar import prior_sample as svar_prior_sample
 from precond_npe_misspec.examples.svar import summaries as svar_summaries
 from precond_npe_misspec.examples.svar import true_dgp as svar_true_dgp
 from precond_npe_misspec.pipelines.base_pnpe import (
-    ExperimentSpec,
-    FlowConfig,
-    default_posterior_flow_builder,
-)
+    ExperimentSpec, FlowConfig, default_posterior_flow_builder)
 
 type Array = jax.Array
 
@@ -149,7 +142,8 @@ def main(cfg: Config) -> None:
             seed=cfg.seed,
             obs_seed=cfg.obs_seed,
             theta_true=cfg.theta_true,
-            sim_kwargs=None,  # SVAR sim fns take explicit args
+            sim_kwargs={"k": cfg.k, "T": cfg.T, "obs_model": cfg.obs_model},
+            summaries_kwargs={"k": cfg.k},
             outdir=cfg.outdir,
             precond=cfg.precond,
             posterior=cfg.posterior,

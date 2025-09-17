@@ -8,20 +8,15 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from precond_npe_misspec.engine.run import (
-    PosteriorConfig,
-    PrecondConfig,
-    RobustConfig,
-    RunConfig,
-    run_experiment,
-)
+from precond_npe_misspec.engine.run import (PosteriorConfig, PrecondConfig,
+                                            RobustConfig, RunConfig,
+                                            run_experiment)
 from precond_npe_misspec.examples.gnk import gnk as gnk_quantile
-from precond_npe_misspec.examples.gnk import prior_logpdf, ss_robust, true_dgp
+from precond_npe_misspec.examples.gnk import prior_logpdf as gnk_prior_logpdf
+from precond_npe_misspec.examples.gnk import simulate as gnk_simulate
+from precond_npe_misspec.examples.gnk import ss_robust, true_dgp
 from precond_npe_misspec.pipelines.base_pnpe import (
-    ExperimentSpec,
-    FlowConfig,
-    default_posterior_flow_builder,
-)
+    ExperimentSpec, FlowConfig, default_posterior_flow_builder)
 
 
 def _prior_sample_factory(cfg: Config) -> Callable[[jax.Array], jnp.ndarray]:
@@ -73,7 +68,7 @@ def main(cfg: Config) -> None:
         theta_dim=4,
         s_dim=s_dim,
         prior_sample=_prior_sample_factory(cfg),
-        prior_logpdf=lambda th: prior_logpdf(
+        prior_logpdf=lambda th: gnk_prior_logpdf(
             th,
             A_min=cfg.A_min,
             A_max=cfg.A_max,
@@ -84,14 +79,14 @@ def main(cfg: Config) -> None:
             k_min=cfg.k_min,
             k_max=cfg.k_max,
         ),
-        true_dgp=lambda key, _, **kw: true_dgp(
-            key, n_obs=cfg.n_obs
-        ),  # ignore θ for well-specified GNK
-        simulate=lambda key, th, **kw: _simulate_gnk(key, th, n_obs=cfg.n_obs),
+        true_dgp=lambda key, _, **kw: true_dgp(key, n_obs=cfg.n_obs),
+        simulate=lambda key, th, **kw: gnk_simulate(key, th, n_obs=cfg.n_obs),
         summaries=ss_robust,
         build_posterior_flow=default_posterior_flow_builder(4, s_dim),
         theta_lo=jnp.array([cfg.A_min, cfg.B_min, cfg.g_min, cfg.k_min]),
         theta_hi=jnp.array([cfg.A_max, cfg.B_max, cfg.g_max, cfg.k_max]),
+        simulate_path="precond_npe_misspec.examples.gnk:simulate",
+        summaries_path="precond_npe_misspec.examples.gnk:summaries_for_metrics",
     )
 
     run_experiment(

@@ -31,14 +31,18 @@ matplotlib.use("Agg")
 EPS = 1e-8
 
 
-def _to_unconstrained(theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) -> jnp.ndarray:
+def _to_unconstrained(
+    theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray
+) -> jnp.ndarray:
     # map (lo,hi) -> R via logit
     p = (theta - lo) / (hi - lo)
     p = jnp.clip(p, 1e-6, 1.0 - 1e-6)
     return jnp.log(p) - jnp.log1p(-p)
 
 
-def _from_unconstrained(u: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) -> jnp.ndarray:
+def _from_unconstrained(
+    u: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray
+) -> jnp.ndarray:
     # map R -> (lo,hi) via sigmoid
     return lo + (hi - lo) * jnn.sigmoid(u)
 
@@ -158,12 +162,16 @@ class RunResult:
 #     return _builder
 
 
-def default_posterior_flow_builder(theta_dim: int, s_dim: int) -> Callable[[Array, FlowConfig], eqx.Module]:
+def default_posterior_flow_builder(
+    theta_dim: int, s_dim: int
+) -> Callable[[Array, FlowConfig], eqx.Module]:
     def _builder(key: Array, cfg: FlowConfig) -> eqx.Module:
         return coupling_flow(
             key=key,
             base_dist=Normal(jnp.zeros(theta_dim)),  # random variable is θ
-            transformer=bij.RationalQuadraticSpline(knots=cfg.knots, interval=cfg.interval),
+            transformer=bij.RationalQuadraticSpline(
+                knots=cfg.knots, interval=cfg.interval
+            ),
             cond_dim=s_dim,  # condition on s
             flow_layers=cfg.flow_layers,
             nn_width=cfg.nn_width,
@@ -192,7 +200,9 @@ def _make_dataset(
     @eqx.filter_jit  # type: ignore
     def _simulate_batch(th_keys: Array, sm_keys: Array) -> tuple[Array, Array]:
         thetas_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, thetas_b)
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+            sm_keys, thetas_b
+        )
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
         return thetas_b, S_b
 
@@ -246,7 +256,9 @@ def _abc_rejection_with_sim(
         th_keys = jax.vmap(lambda i: jax.random.fold_in(k_th_base, i))(idx)
         th_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
         sm_keys = jax.vmap(lambda i: jax.random.fold_in(k_sm_base, i))(idx)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, th_b)
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+            sm_keys, th_b
+        )
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
 
         d_b = _to_vec(dist_fn(S_b, s_obs))  # (B,)
@@ -267,7 +279,11 @@ def _abc_rejection_with_sim(
     n_tot = int(d_all.shape[0])
 
     # Keep exactly n_keep items: q as fraction in (0,1], or integer count if q>=1.
-    n_keep = max(1, min(n_tot, math.ceil(q * n_tot))) if 0 < q <= 1.0 else max(1, min(n_tot, int(q)))
+    n_keep = (
+        max(1, min(n_tot, math.ceil(q * n_tot)))
+        if 0 < q <= 1.0
+        else max(1, min(n_tot, int(q)))
+    )
 
     # Indices of the n_keep smallest distances.
     idx = jnp.argpartition(d_all, n_keep - 1)[:n_keep]
@@ -299,7 +315,7 @@ def preconditioning_step(
         if spec.make_distance is None:
             dist_fn: DistanceFn = dist.euclidean
         else:
-            dist_fn = spec.make_distance(S_pilot)
+            dist_fn = spec.make_distance(S_pilot)  # type: ignore
 
         key, k_abc = jax.random.split(key)
         theta_acc, S_acc = _abc_rejection_with_sim(
@@ -396,7 +412,9 @@ def npe_step(
         )
         # Keep θ‑domain summary stats for reporting/artifacts
         th_mean, th_std = jnp.mean(theta_acc, 0), jnp.std(theta_acc, 0) + EPS
-        return _PosteriorTrained(posterior_flow, S_mean, S_std, th_mean, th_std, _losses)
+        return _PosteriorTrained(
+            posterior_flow, S_mean, S_std, th_mean, th_std, _losses
+        )
 
     # -------- fallback: original unconstrained training on θ --------
     th_mean, th_std = jnp.mean(theta_acc, 0), jnp.std(theta_acc, 0) + EPS
@@ -421,7 +439,9 @@ def npe_step(
     return _PosteriorTrained(posterior_flow, S_mean, S_std, th_mean, th_std, _losses)
 
 
-def run_experiment(spec: ExperimentSpec, run: RunConfig, flow_cfg: FlowConfig) -> RunResult:
+def run_experiment(
+    spec: ExperimentSpec, run: RunConfig, flow_cfg: FlowConfig
+) -> RunResult:
     rng = jax.random.key(run.seed)
     obs_seed = jax.random.key(run.obs_seed)
 
@@ -443,7 +463,9 @@ def run_experiment(spec: ExperimentSpec, run: RunConfig, flow_cfg: FlowConfig) -
     rng, k_post = jax.random.split(rng)
     s_obs_w = _standardise(s_obs, posterior.S_mean, posterior.S_std)
     print("s_obs_w: ", s_obs_w)
-    th_samps = posterior.flow.sample(k_post, (run.n_posterior_draws,), condition=s_obs_w)
+    th_samps = posterior.flow.sample(
+        k_post, (run.n_posterior_draws,), condition=s_obs_w
+    )
 
     result = RunResult(
         theta_acc_precond=theta_acc,
