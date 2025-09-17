@@ -9,23 +9,15 @@ import jax.numpy as jnp
 import tyro
 
 from data.markets import load_sp500_returns_yahoo
-from precond_npe_misspec.engine.run import (PosteriorConfig, PrecondConfig,
-                                            RobustConfig, RunConfig,
-                                            run_experiment)
-from precond_npe_misspec.examples.alpha_stable_sv import \
-    assumed_dgp as asv_assumed_dgp
-from precond_npe_misspec.examples.alpha_stable_sv import \
-    prior_sample as asv_prior_sample
-from precond_npe_misspec.examples.alpha_stable_sv import \
-    summaries_for_metrics as asv_summaries_for_metrics
+from precond_npe_misspec.engine.run import PosteriorConfig, PrecondConfig, RobustConfig, RunConfig, run_experiment
+from precond_npe_misspec.examples.alpha_stable_sv import assumed_dgp as asv_assumed_dgp
+from precond_npe_misspec.examples.alpha_stable_sv import prior_sample as asv_prior_sample
+from precond_npe_misspec.examples.alpha_stable_sv import summaries_for_metrics as asv_summaries_for_metrics
 from precond_npe_misspec.examples.alpha_stable_sv import theta_bounds_3d
-from precond_npe_misspec.pipelines.base_pnpe import (
-    ExperimentSpec, FlowConfig, default_posterior_flow_builder)
+from precond_npe_misspec.pipelines.base_pnpe import ExperimentSpec, FlowConfig, default_posterior_flow_builder
 
 
-def _uniform_logpdf_box(
-    theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray
-) -> jnp.ndarray:
+def _uniform_logpdf_box(theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) -> jnp.ndarray:
     """Log-density of a uniform over the axis-aligned box [lo, hi]."""
     th = jnp.asarray(theta)
     inside = jnp.all((th >= lo) & (th <= hi))

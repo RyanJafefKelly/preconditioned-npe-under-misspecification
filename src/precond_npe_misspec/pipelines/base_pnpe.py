@@ -315,7 +315,7 @@ def preconditioning_step(
         if spec.make_distance is None:
             dist_fn: DistanceFn = dist.euclidean
         else:
-            dist_fn = spec.make_distance(S_pilot)  # type: ignore
+            dist_fn = spec.make_distance(S_pilot)
 
         key, k_abc = jax.random.split(key)
         theta_acc, S_acc = _abc_rejection_with_sim(
