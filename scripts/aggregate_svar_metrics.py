@@ -121,7 +121,7 @@ def _find_theta_labels(run_dir: Path, theta_dim: int) -> list[str]:
             except Exception:
                 pass
     if not labels or len(labels) != theta_dim:
-        return [f"p{i+1}" for i in range(theta_dim)]
+        return [f"p{i + 1}" for i in range(theta_dim)]
     return list(labels)
 
 
@@ -401,6 +401,65 @@ def _aggregate(args: Args) -> None:
             return f"{100.0 * x:.{args.decimals}f}"
         return f"{x:.{args.decimals}f}"
 
+    def _escape_tex(s: str) -> str:
+        # Minimal TeX escaping for table text
+        if s is None:
+            return ""
+        rep = {
+            "\\": r"\textbackslash{}",
+            "&": r"\&",
+            "%": r"\%",
+            "$": r"\$",
+            "#": r"\#",
+            "_": r"\_",
+            "{": r"\{",
+            "}": r"\}",
+            "~": r"\textasciitilde{}",
+            "^": r"\textasciicircum{}",
+        }
+        out = str(s)
+        for k, v in rep.items():
+            out = out.replace(k, v)
+        return out
+
+    def _df_to_latex_simple(
+        df: pd.DataFrame, *, percent: bool, decimals: int, caption: str, label: str
+    ) -> str:
+        cols = [str(c) for c in df.columns]
+        colspec = "l" + "c" * len(cols)
+        lines: list[str] = []
+        lines.append(r"\begin{table}[ht]")
+        lines.append(r"\centering")
+        lines.append(r"\begin{tabular}{" + colspec + r"}")
+        lines.append(r"\hline")
+        header = [""] + [_escape_tex(c) for c in cols]
+        lines.append(" & ".join(header) + r" \\")
+        lines.append(r"\hline")
+        for r, idx in enumerate(df.index):
+            row = [_escape_tex(str(idx))]
+            for c in cols:
+                v = df.iloc[r][c]
+                if pd.isna(v):
+                    row.append(r"--")
+                else:
+                    x = float(v)
+                    if percent:
+                        x = 100.0 * x
+                    # int-like → no decimals
+                    if abs(x - round(x)) < 1e-12:
+                        row.append(f"{int(round(x))}")
+                    else:
+                        row.append(f"{x:.{decimals}f}")
+            lines.append(" & ".join(row) + r" \\")
+        lines.append(r"\hline")
+        lines.append(r"\end{tabular}")
+        if caption:
+            lines.append(r"\caption{" + _escape_tex(caption) + r"}")
+        if label:
+            lines.append(r"\label{" + _escape_tex(label) + r"}")
+        lines.append(r"\end{table}")
+        return "\n".join(lines)
+
     def _write_latex(
         df: pd.DataFrame,
         fname: str,
@@ -408,19 +467,8 @@ def _aggregate(args: Args) -> None:
         caption: str = "",
         label: str = "",
     ):
-        df_out = df.copy()
-        if percent:
-            df_out = df_out.applymap(
-                lambda v: np.nan if pd.isna(v) else 100.0 * float(v)
-            )
-        float_format = lambda v: f"{v:.{args.decimals}f}"
-        latex = df_out.to_latex(
-            escape=False,
-            index=True,
-            float_format=float_format,
-            column_format="l" + "c" * len(df.columns),
-            caption=caption or None,
-            label=label or None,
+        latex = _df_to_latex_simple(
+            df, percent=percent, decimals=args.decimals, caption=caption, label=label
         )
         (out_dir / fname).write_text(latex)
 
@@ -428,14 +476,14 @@ def _aggregate(args: Args) -> None:
         df_cov_hpdi,
         f"coverage_hpdi_{lvl_tag}.tex",
         percent=args.percent,
-        caption=f"SVAR marginal HPDI {int(args.level*100)}\\% coverage.",
+        caption=f"SVAR marginal HPDI {int(args.level * 100)}\\% coverage.",
         label="tab:svar_cov_hpdi",
     )
     _write_latex(
         df_cov_central,
         f"coverage_central_{lvl_tag}.tex",
         percent=args.percent,
-        caption=f"SVAR marginal central {int(args.level*100)}\\% coverage.",
+        caption=f"SVAR marginal central {int(args.level * 100)}\\% coverage.",
         label="tab:svar_cov_central",
     )
     _write_latex(
