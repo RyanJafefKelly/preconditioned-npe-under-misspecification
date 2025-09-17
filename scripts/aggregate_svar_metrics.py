@@ -26,7 +26,7 @@ class Args:
     percent: bool = False  # render coverage as % in LaTeX
     decimals: int = 2  # numeric display precision in LaTeX
     verbose: bool = True
-
+    debug_runs: int = 0  # print debug for first N runs per method
 
 # ------------------------ Utilities ------------------------
 
@@ -164,16 +164,27 @@ def _get_theta_target(
     for key in flat_md:
         lk = key.lower()
         if any(
-            tk in lk
-            for tk in (
-                "theta_target",
-                "theta.dagger",
-                "theta_dagger",
-                "target_theta",
-                "theta*",
+            val = flat_md[key]
+            if any(
+                tk in lk
+                for tk in (
+                    "theta_target",
+                    "theta.dagger",
+                    "theta_dagger",
+                    "target_theta",
+                    "theta*",
+                )
             )
-        ) and isinstance(flat_md[key], (list, tuple)):
-            arr = np.asarray(flat_md[key], dtype=float).reshape(-1)
+        ):
+            if isinstance(val, (list, tuple)):
+                arr = np.asarray(val, dtype=float).reshape(-1)
+            elif isinstance(val, str):
+                try:
+                    arr = np.asarray([float(t) for t in re.split(r"[,\s]+", val.strip()) if t], dtype=float)
+                except Exception:
+                    continue
+            else:
+                continue
             if arr.size == theta_dim:
                 return arr
     # Fallback: config.json → run_cfg.theta_true
@@ -264,6 +275,17 @@ def _parse_metrics(md: dict[str, Any]) -> dict[str, Any]:
                 best = float(v)
         return best
 
+    def _find_array(keys_any: Iterable[str], keys_all: Iterable[str] = ()) -> np.ndarray | None:
+        for k, v in flat_l.items():
+            if isinstance(v, (list, tuple, np.ndarray)):
+                s = k
+                if all(a in s for a in keys_all) and all(a in s for a in keys_any):
+                    arr = np.asarray(v, dtype=float).reshape(-1)
+                    if arr.size:
+                        return arr
+        return None
+
+
     # coverage
     hpdi_cov = (
         _coerce_bool_array(_find_vec(keys_any=("hpdi",), keys_all=("cover",)))
@@ -283,17 +305,22 @@ def _parse_metrics(md: dict[str, Any]) -> dict[str, Any]:
     )
 
     # log-probability at target
-    logprob = _find_scalar(keys_all=("log",))  # broad
+    logprob = None
     # prefer target-specific keys if present
     for keys in (
         ("log", "prob", "target"),
-        ("log", "density", "target"),
+        ("log", "lik", "target"),
+        ("logp", "target"),
+        ("lp", "target"),
         ("synlik", "target"),
+        ("log", "density", "target"),
     ):
         v = _find_scalar(keys_all=keys)
         if v is not None:
             logprob = v
             break
+    if logprob is None:
+        logprob = _find_scalar(keys_all=("log", "prob"))
 
     # posterior predictive distance median
     ppd_median = None
@@ -302,6 +329,15 @@ def _parse_metrics(md: dict[str, Any]) -> dict[str, Any]:
         if v is not None:
             ppd_median = v
             break
+    if ppd_median is None:
+        # derive median from arrays if present
+        arr = (
+            _find_array(keys_any=("ppd", "l2"), keys_all=())
+            or _find_array(keys_any=("ppd", "dist"), keys_all=())
+            or _find_array(keys_any=("ppc", "l2"), keys_all=())
+        )
+        if arr is not None and arr.size:
+            ppd_median = float(np.median(arr))
 
     out["hpdi_cov"] = hpdi_cov
     out["central_cov"] = central_cov
@@ -367,6 +403,7 @@ def _aggregate(args: Args) -> None:
     ppd_med: dict[str, list[float]] = {m: [] for m in methods}
 
     for m in methods:
+        dbg_left = args.debug_runs
         for seed, run_dir in sorted(chosen[m].items()):
             md_path = run_dir / "metrics.json"
             try:
@@ -418,9 +455,11 @@ def _aggregate(args: Args) -> None:
                             parsed["central_cov"] = cent_v
                         if need_mse:
                             parsed["mse"] = mse_v
+                    elif args.verbose:
+                        print(f"[info] target not found for {run_dir}")
                 else:
                     if args.verbose:
-                        print(f"[info] samples not found or bad shape in {run_dir}")
+                        print(f"[info] samples not found/bad shape in {run_dir}")
 
             # push arrays if shapes match
             def _push(dst: dict[str, list[np.ndarray]], key: str):
@@ -443,6 +482,15 @@ def _aggregate(args: Args) -> None:
                 logprob[m].append(float(parsed["logprob"]))
             if isinstance(parsed.get("ppd_median"), (int, float)):
                 ppd_med[m].append(float(parsed["ppd_median"]))
+            if args.debug_runs > 0 and dbg_left > 0:
+                dbg_left -= 1
+                print(f"[debug] {m} seed={seed} dir={run_dir.name}")
+                print(f"        hpdi_cov={parsed.get('hpdi_cov')}")
+                print(f"        central_cov={parsed.get('central_cov')}")
+                print(f"        bias={parsed.get('bias')}")
+                print(f"        mse={parsed.get('mse')}")
+                print(f"        logprob={parsed.get('logprob')}")
+                print(f"        ppd_median={parsed.get('ppd_median')}")
 
     assert theta_dim is not None
     assert labels is not None
