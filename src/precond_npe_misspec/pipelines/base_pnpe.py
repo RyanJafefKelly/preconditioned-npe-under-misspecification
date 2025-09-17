@@ -5,11 +5,12 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import equinox as eqx
 import flowjax.bijections as bij
 import jax
+import jax.nn as jnn
 import jax.numpy as jnp
 import matplotlib
 from flowjax.distributions import Normal
@@ -17,6 +18,7 @@ from flowjax.distributions import Transformed as _Transformed
 from flowjax.flows import coupling_flow
 from flowjax.train import fit_to_data
 
+from precond_npe_misspec.algorithms.smc_abc import run_smc_abc  # NEW import
 from precond_npe_misspec.utils import distances as dist
 from precond_npe_misspec.utils.artifacts import save_artifacts
 
@@ -29,12 +31,38 @@ matplotlib.use("Agg")
 EPS = 1e-8
 
 
+def _to_unconstrained(theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) -> jnp.ndarray:
+    # map (lo,hi) -> R via logit
+    p = (theta - lo) / (hi - lo)
+    p = jnp.clip(p, 1e-6, 1.0 - 1e-6)
+    return jnp.log(p) - jnp.log1p(-p)
+
+
+def _from_unconstrained(u: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) -> jnp.ndarray:
+    # map R -> (lo,hi) via sigmoid
+    return lo + (hi - lo) * jnn.sigmoid(u)
+
+
+class _BoundedPosterior(eqx.Module):  # type: ignore[misc]
+    base: eqx.Module  # flow over u_proc
+    u_mean: jnp.ndarray  # (theta_dim,)
+    u_std: jnp.ndarray  # (theta_dim,)
+    lo: jnp.ndarray  # (theta_dim,)
+    hi: jnp.ndarray  # (theta_dim,)
+
+    def sample(self, key: Array, shape: tuple[int, ...], *, condition: Array) -> Array:
+        u_proc = cast(Array, self.base.sample(key, shape, condition=condition))
+        u = u_proc * self.u_std + self.u_mean
+        return _from_unconstrained(u, self.lo, self.hi)
+
+
 @dataclass(frozen=True)
 class ExperimentSpec:
     name: str
     theta_dim: int
     s_dim: int
     prior_sample: Callable[[Array], jnp.ndarray]
+    prior_logpdf: Callable[[Array], Array] | None
     true_dgp: Callable[..., jnp.ndarray]  # true_dgp(key, theta, **sim_kwargs) -> x
     simulate: Callable[..., jnp.ndarray]  # simulate(key, theta, **sim_kwargs) -> x
     summaries: Callable[[jnp.ndarray], jnp.ndarray]  # s = summaries(x)
@@ -45,6 +73,12 @@ class ExperimentSpec:
     make_distance: DistanceFactory | None = None
     theta_labels: tuple[str, ...] | None = None
     summary_labels: tuple[str, ...] | None = None
+    # param range ... fall back to unconstrained if None
+    theta_lo: jnp.ndarray | None = None  # shape (theta_dim,)
+    theta_hi: jnp.ndarray | None = None  # shape (theta_dim,)
+    # simulate, summary path - so can call for posterior predictive checks
+    simulate_path: str | None = None
+    summaries_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +100,7 @@ class RunConfig:
     theta_true: float | jnp.ndarray = 0.0
     outdir: str | None = None
     # Preconditioning ABC
+    precond_method: Literal["rejection", "smc_abc"] = "rejection"  # NEW
     n_sims: int = 200_000  # number of simulations to run
     q_precond: float = 0.1  # acceptance quantile
     # Post-processing
@@ -78,6 +113,16 @@ class RunConfig:
     # Plot/save options
     fig_dpi: int = 160
     fig_format: str = "pdf"
+    # SMC‑ABC params
+    smc_n_particles: int = 1_000
+    smc_alpha: float = 0.5
+    smc_epsilon0: float = 1e6
+    smc_eps_min: float = 1e-3
+    smc_acc_min: float = 0.10
+    smc_max_iters: int = 5
+    smc_initial_R: int = 1
+    smc_c_tuning: float = 0.01
+    smc_B_sim: int = 1
 
 
 @dataclass
@@ -243,35 +288,53 @@ def preconditioning_step(
 ) -> tuple[Array, Array]:
     sim_kwargs = {} if run.sim_kwargs is None else dict(run.sim_kwargs)
 
-    # 1) Pilot set to summaries for ABC distance
-    key, k_pilot = jax.random.split(key)
-    _, S_pilot = _make_dataset(spec, k_pilot, run.n_sims, **sim_kwargs)
+    # pilot set solely for distance construction if needed
+    S_pilot: jnp.ndarray | None = None
+    if spec.make_distance is not None:
+        key, k_pilot = jax.random.split(key)
+        _, S_pilot = _make_dataset(spec, k_pilot, run.n_sims, **sim_kwargs)
 
-    # 2) Distance
-    if spec.make_distance is None:
-        dist_fn: DistanceFn = dist.euclidean  # no cast
-    else:
-        dist_fn = spec.make_distance(S_pilot)  # returns DistanceFn
+    if run.precond_method == "rejection":
+        # fall back to existing rejection ABC
+        if spec.make_distance is None:
+            dist_fn: DistanceFn = dist.euclidean
+        else:
+            dist_fn = spec.make_distance(S_pilot)
 
-    # 3) ABC rejection to get concentrated θ set
-    key, k_abc = jax.random.split(key)
-    theta_acc, S_acc = _abc_rejection_with_sim(
-        spec,
-        k_abc,
-        s_obs,
-        run.n_sims,
-        run.q_precond,
-        # S_mean,
-        # S_std,
-        dist_fn,
-        batch_size=run.batch_size,
-        **sim_kwargs,
+        key, k_abc = jax.random.split(key)
+        theta_acc, S_acc = _abc_rejection_with_sim(
+            spec,
+            k_abc,
+            s_obs,
+            run.n_sims,
+            run.q_precond,
+            dist_fn,
+            batch_size=run.batch_size,
+            **sim_kwargs,
+        )
+        print("Number of accepted parameters:", theta_acc.shape[0])
+        return theta_acc, S_acc
+
+    # SMC‑ABC path
+    key, k_smc = jax.random.split(key)
+    theta_particles, S_particles = run_smc_abc(
+        key=k_smc,
+        n_particles=run.smc_n_particles,
+        epsilon0=run.smc_epsilon0,
+        alpha=run.smc_alpha,
+        eps_min=run.smc_eps_min,
+        acc_min=run.smc_acc_min,
+        max_iters=run.smc_max_iters,
+        initial_R=run.smc_initial_R,
+        c_tuning=run.smc_c_tuning,
+        B_sim=run.smc_B_sim,
+        spec=spec,
+        s_obs=s_obs,
+        sim_kwargs=sim_kwargs,
+        S_pilot_for_distance=S_pilot,
     )
-    assert theta_acc.shape[0] > 0, "ABC returned zero accepted parameters."
-
-    print("Number of accepted parameters:", theta_acc.shape[0])
-
-    return theta_acc, S_acc
+    print("Number of SMC particles:", theta_particles.shape[0])
+    return theta_particles, S_particles
 
 
 @dataclass
@@ -305,10 +368,44 @@ def npe_step(
     # 3) Fit conditional flow for p(θ | s)
     key, k_build, k_fit = jax.random.split(key, 3)
     flow0 = spec.build_posterior_flow(k_build, flow_cfg)
+    if (spec.theta_lo is not None) and (spec.theta_hi is not None):
+        lo = jnp.asarray(spec.theta_lo)
+        hi = jnp.asarray(spec.theta_hi)
+        # unconstrained params
+        u_acc = _to_unconstrained(theta_acc, lo, hi)
+        u_mean, u_std = jnp.mean(u_acc, 0), jnp.std(u_acc, 0) + EPS
+        u_proc = (u_acc - u_mean) / u_std
+
+        flow_fit, _losses = fit_to_data(
+            key=k_fit,
+            dist=flow0,
+            data=(u_proc, S_proc),
+            learning_rate=flow_cfg.learning_rate,
+            max_epochs=flow_cfg.max_epochs,
+            max_patience=flow_cfg.max_patience,
+            batch_size=flow_cfg.batch_size,
+            show_progress=True,
+        )
+        # Wrap with sampler that maps back into (lo,hi)
+        posterior_flow = _BoundedPosterior(
+            base=flow_fit,
+            u_mean=u_mean,
+            u_std=u_std,
+            lo=lo,
+            hi=hi,
+        )
+        # Keep θ‑domain summary stats for reporting/artifacts
+        th_mean, th_std = jnp.mean(theta_acc, 0), jnp.std(theta_acc, 0) + EPS
+        return _PosteriorTrained(posterior_flow, S_mean, S_std, th_mean, th_std, _losses)
+
+    # -------- fallback: original unconstrained training on θ --------
+    th_mean, th_std = jnp.mean(theta_acc, 0), jnp.std(theta_acc, 0) + EPS
+    th_proc = _standardise(theta_acc, th_mean, th_std)
+
     flow_fit, _losses = fit_to_data(
         key=k_fit,
         dist=flow0,
-        data=(th_proc, S_proc),  # conditional MLE
+        data=(th_proc, S_proc),
         learning_rate=flow_cfg.learning_rate,
         max_epochs=flow_cfg.max_epochs,
         max_patience=flow_cfg.max_patience,
@@ -320,10 +417,7 @@ def npe_step(
     TransformedD = cast(Any, _Transformed)
     affine_bij = bij.Affine(-th_mean / th_std, 1.0 / th_std)
     invert_bij = Invert(affine_bij)
-    posterior_flow = TransformedD(
-        base_dist=flow_fit,
-        bijection=invert_bij,
-    )
+    posterior_flow = TransformedD(base_dist=flow_fit, bijection=invert_bij)
     return _PosteriorTrained(posterior_flow, S_mean, S_std, th_mean, th_std, _losses)
 
 
