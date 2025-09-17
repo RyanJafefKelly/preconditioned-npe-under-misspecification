@@ -58,14 +58,14 @@ env | sort > "${OUTDIR}/env.txt"
 THETA_TARGET_DEFAULT="0.579 -0.143 0.836 0.745 -0.660 -0.254 0.1"
 THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"; THETA_TARGET="${THETA_TARGET//,/}"; read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET"
 
-cat > "$OUTDIR/entrypoints.json" <<EOF
-{
-  "simulate": "precond_npe_misspec.examples.svar:simulate",
-  "summaries": "precond_npe_misspec.examples.svar:summaries_for_metrics",
-  "sim_kwargs": {"k": $K, "T": $T, "obs_model": "$OBS_MODEL"},
-  "summaries_kwargs": {"k": $K}
-}
-EOF
+# cat > "$OUTDIR/entrypoints.json" <<EOF
+# {
+#   "simulate": "precond_npe_misspec.examples.svar:simulate",
+#   "summaries": "precond_npe_misspec.examples.svar:summaries_for_metrics",
+#   "sim_kwargs": {"k": $K, "T": $T, "obs_model": "$OBS_MODEL"},
+#   "summaries_kwargs": {"k": $K}
+# }
+# EOF
 
 uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --outdir "$OUTDIR" \

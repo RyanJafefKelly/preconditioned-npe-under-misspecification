@@ -75,10 +75,23 @@ THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"
 THETA_TARGET="${THETA_TARGET//,/}"
 read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET"
 
+# cat > "$OUTDIR/entrypoints.json" <<EOF
+# {
+#   "simulate": "precond_npe_misspec.examples.svar:simulate",
+#   "summaries": "precond_npe_misspec.examples.svar:summaries_for_metrics",
+#   "sim_kwargs": {"k": $K, "T": $T, "obs_model": "$OBS_MODEL"},
+#   "summaries_kwargs": {"k": $K}
+# }
+# EOF
+
 uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --outdir "$OUTDIR" \
   --theta-target "${THETA_TARGET_ARR[@]}" \
   --level 0.95 \
   --want-hpdi \
   --want-central \
-  --method NPE
+  --method NPE \
+  --compute-ppd \
+  --ppd-entrypoints "$OUTDIR/entrypoints.json" \
+  --ppd-n 1000 \
+  --ppd-metric l2

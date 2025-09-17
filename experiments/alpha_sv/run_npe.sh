@@ -5,14 +5,14 @@ export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 DATE=$(date +"%Y%m%d-%H%M%S")
 
 : "${SEED:=0}"
-: "${K:=6}"
 : "${T:=1000}"
-: "${OBS_MODEL:=assumed}"   # assumed|true
+: "${THETA1:=0.0}"
+: "${OBS_MODEL:=true}"     # assumed|true
 
-# θ is 7D for k=6
-THETA_DEFAULT="0.579 -0.143 0.836 0.745 -0.660 -0.254 0.1"
+# θ = (θ2, θ3, α)
+THETA_DEFAULT="0.95 0.25 1.99"
 THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
-(( ${#THETA_ARR[@]} == 7 )) || { echo "need 7 values for THETA"; exit 1; }
+(( ${#THETA_ARR[@]} == 3 )) || { echo "need 3 values for THETA"; exit 1; }
 
 : "${N_SIMS:=20000}"
 : "${N_POSTERIOR_DRAWS:=20000}"
@@ -22,12 +22,13 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 
 th_parts=(); for i in "${!THETA_ARR[@]}"; do th_parts+=("p$((i+1))${THETA_ARR[$i]}"); done
 THETA_TAG=$(IFS=_; echo "${th_parts[*]}")
-GROUP="th_${THETA_TAG}-K_${K}-T_${T}-obs_${OBS_MODEL}-n_sims_${N_SIMS}"
-OUTDIR="results/svar/npe/${GROUP}/seed-${SEED}/${DATE}"; mkdir -p "$OUTDIR"
+GROUP="th_${THETA_TAG}-T_${T}-th1_${THETA1}-obs_${OBS_MODEL}-n_sims_${N_SIMS}"
+OUTDIR="results/alpha_sv/npe/${GROUP}/seed-${SEED}/${DATE}"; mkdir -p "$OUTDIR"
 
-cmd=(uv run python -m precond_npe_misspec.pipelines.svar
+cmd=(uv run python -m precond_npe_misspec.pipelines.alpha_sv
   --seed "$SEED" --obs_seed "$((10#$SEED + 1234))" --outdir "$OUTDIR"
-  --theta_true "${THETA_ARR[@]}" --k "$K" --T "$T" --obs_model "$OBS_MODEL"
+  --theta_true "${THETA_ARR[@]}" --T "$T" --theta1 "$THETA1"
+  --obs_model "$OBS_MODEL"
   --precond.method "none" --precond.n_sims "$N_SIMS"
   --posterior.method "npe" --posterior.n_posterior_draws "$N_POSTERIOR_DRAWS"
   --flow.flow_layers "$FLOW_LAYERS" --flow.nn_width "$NN_WIDTH" --flow.knots "$KNOTS" --flow.interval "$INTERVAL"
@@ -38,19 +39,17 @@ printf '%q ' "${cmd[@]}" | tee "${OUTDIR}/cmd.txt"; echo
 env | sort > "${OUTDIR}/env.txt"
 "${cmd[@]}" 2>&1 | tee "${OUTDIR}/stdout.log"
 
-# THETA_TARGET_DEFAULT="0.835 0.382 0.899 0.824 0.172 0.283 0.1286"
-THETA_TARGET_DEFAULT="0.579 -0.143 0.836 0.745 -0.660 -0.254 0.1"
+THETA_TARGET_DEFAULT="0.95 0.25 1.99"
 THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"; THETA_TARGET="${THETA_TARGET//,/}"; read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET"
 
 # cat > "$OUTDIR/entrypoints.json" <<EOF
 # {
-#   "simulate": "precond_npe_misspec.examples.svar:simulate",
-#   "summaries": "precond_npe_misspec.examples.svar:summaries_for_metrics",
-#   "sim_kwargs": {"k": $K, "T": $T, "obs_model": "$OBS_MODEL"},
-#   "summaries_kwargs": {"k": $K}
+#   "simulate": "precond_npe_misspec.examples.alpha_stable_sv:simulate",
+#   "summaries": "precond_npe_misspec.examples.alpha_stable_sv:summaries_for_metrics",
+#   "sim_kwargs": {"T": $T, "theta1": $THETA1},
+#   "summaries_kwargs": {}
 # }
 # EOF
-
 
 uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --outdir "$OUTDIR" \
