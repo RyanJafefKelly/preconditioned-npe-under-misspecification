@@ -33,7 +33,7 @@ _METHODS_ORDER = ("npe", "pnpe", "rnpe", "prnpe")
 
 
 def _discover_methods(root: Path) -> list[str]:
-    cand = [p.name for p in root.iterdir() if p.is_dir()]
+    cand = [p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith("_")]
     # keep standard order, then append any extras
     ordered = [m for m in _METHODS_ORDER if m in cand]
     extras = [m for m in cand if m not in ordered]
@@ -235,7 +235,12 @@ def _aggregate(args: Args) -> None:
         mdir = root / m
         if not mdir.is_dir():
             continue
-        g = _pick_group_for_method(mdir, args.group_hint)
+        try:
+            g = _pick_group_for_method(mdir, args.group_hint)
+        except RuntimeError:
+            if args.verbose:
+                print(f"[skip] no GROUP directories under {mdir}")
+            continue
         groups_used[m] = g
         seeds = {}
         gdir = mdir / g
