@@ -246,3 +246,53 @@ if __name__ == "__main__":
     s_hat = summaries_hat(r)
     print("β_hat:", beta_hat)
     print("score summaries @ β̂(y):", s_hat)
+
+
+def _mad(x: jnp.ndarray) -> jnp.ndarray:
+    med = jnp.median(x)
+    return jnp.median(jnp.abs(x - med)) + EPS
+
+
+def _corr(x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
+    xm, ym = x - jnp.mean(x), y - jnp.mean(y)
+    sx = jnp.std(xm) + EPS
+    sy = jnp.std(ym) + EPS
+    return jnp.mean(xm * ym) / (sx * sy)
+
+
+def _acf(x: jnp.ndarray, lag: int) -> jnp.ndarray:
+    if lag >= x.size:
+        return jnp.asarray(0.0, x.dtype)
+    return _corr(x[:-lag], x[lag:])
+
+
+def summaries_for_metrics(y: jnp.ndarray) -> jnp.ndarray:
+    """7‑D tail/vol/leverage summaries used for training and PPD."""
+    mad = _mad(y)
+    z = y / mad
+    az = jnp.abs(z)
+    acf1 = _acf(az, 1)
+    acf5 = _acf(az, 5) if az.size > 5 else jnp.asarray(0.0, az.dtype)
+    q95 = jnp.quantile(az, 0.95)
+    q99 = jnp.quantile(az, 0.99)
+    tail_ratio = q99 / (q95 + EPS)
+    p35 = jnp.mean(az > 3.5)
+    has_ex2 = jnp.mean(az > 2.0)
+    me2 = jnp.where(
+        has_ex2 > 0,
+        jnp.mean(jnp.maximum(az - 2.0, 0.0) * (az > 2.0)) / (has_ex2 + EPS),
+        0.0,
+    )
+    lev = _corr(z[:-1], jnp.abs(z[1:])) if z.size > 1 else jnp.asarray(0.0, z.dtype)
+    return jnp.array([jnp.log(mad), acf1, acf5, tail_ratio, p35, me2, lev], dtype=jnp.float32)
+
+
+def simulate(
+    key: Array,
+    theta: jnp.ndarray,
+    *,
+    T: int,
+    theta1: float,
+) -> jnp.ndarray:
+    """Entry point for metrics/PPD: assumed model, zero skew."""
+    return assumed_dgp(key, theta, T=T, theta1=theta1)

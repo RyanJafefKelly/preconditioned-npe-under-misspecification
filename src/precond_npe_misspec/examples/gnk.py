@@ -200,3 +200,13 @@ def _get_ss_k(y: Array) -> Array:
     iqr = _get_ss_B(y)  # (batch,1)
     sk = (E7 - E5 + E3 - E1) / iqr
     return sk
+
+
+def simulate(key: Array, theta: jnp.ndarray, *, n_obs: int) -> jnp.ndarray:
+    z = jax.random.normal(key, (n_obs,), dtype=theta.dtype)
+    A, B, g, k = theta
+    return gnk(z, A, B, g, k)
+
+
+def summaries_for_metrics(x: jnp.ndarray) -> jnp.ndarray:
+    return ss_robust(x)
