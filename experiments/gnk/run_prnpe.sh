@@ -8,7 +8,9 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 
 # GNK specifics
 : "${N_OBS:=5000}"
-THETA_DEFAULT="3.0 1.0 2.0 0.5"
+# THETA_DEFAULT="3.0 1.0 2.0 0.5"
+THETA_DEFAULT="2.3663 4.1757 1.7850 0.1001"
+
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
 if (( ${#THETA_ARR[@]} != 4 )); then

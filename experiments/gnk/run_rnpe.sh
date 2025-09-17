@@ -5,11 +5,12 @@ export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 DATE=$(date +"%Y%m%d-%H%M%S")
 
 : "${SEED:=0}"
-echo "Test 1"
 
 # GNK specifics
 : "${N_OBS:=5000}"
-THETA_DEFAULT="3.0 1.0 2.0 0.5"
+# THETA_DEFAULT="3.0 1.0 2.0 0.5"
+THETA_DEFAULT="2.3663 4.1757 1.7850 0.1001"
+
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
 if (( ${#THETA_ARR[@]} != 4 )); then
@@ -22,8 +23,6 @@ fi
 
 OUTDIR="results/gnk/rnpe/th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
-echo "Test 2"
-
 
 # Posterior draws
 : "${N_POSTERIOR_DRAWS:=20000}"
@@ -52,9 +51,6 @@ echo "Test 2"
 : "${MCMC_WARMUP:=1000}"
 : "${MCMC_SAMPLES:=2000}"
 : "${MCMC_THIN:=1}"
-
-echo "Test 3"
-
 
 cmd=(uv run python -m precond_npe_misspec.pipelines.gnk
   --seed "$SEED"
