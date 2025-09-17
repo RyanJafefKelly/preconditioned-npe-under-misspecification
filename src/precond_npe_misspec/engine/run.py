@@ -64,6 +64,7 @@ class RunConfig:
     obs_seed: int = 1234
     theta_true: tuple[float, ...] = (0.0,)  # set by pipeline
     sim_kwargs: dict[str, Any] | None = None
+    summaries_kwargs: dict[str, Any] | None = None
     outdir: str | None = None
     precond: PrecondConfig = field(default_factory=PrecondConfig)
     posterior: PosteriorConfig = field(default_factory=PosteriorConfig)
@@ -131,17 +132,8 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
         rng, k_sfit = jax.random.split(rng)
         q_s_w, _ = fit_s_flow(k_sfit, spec.s_dim, S_tr_w, flow_cfg)
         rng, k_mcmc = jax.random.split(rng)
-        print("q_s.log_prob(raw s_obs)   :", float(q_s_w.log_prob(s_obs)))
-        print(
-            "q_s.log_prob(whitened s_obs_w) (WRONG SCALE):",
-            float(q_s_w.log_prob(s_obs_w)),
-        )  # should be ~ -inf or very small
 
         s_denoised_w, misspec_probs = denoise_s(k_mcmc, s_obs_w, q_s_w, run.robust)
-        print("s_denoised_w: ", s_denoised_w)
-        print("misspec_probs: ", misspec_probs)
-        resid = jnp.mean((s_denoised_w - s_obs_w) ** 2)
-        print("MSE(denoised_w, obs_w):", float(resid))
 
         if run.outdir:
             _od = _Path(run.outdir)
@@ -201,6 +193,7 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             "simulate": getattr(spec, "simulate_path", None),
             "summaries": getattr(spec, "summaries_path", None),
             "sim_kwargs": (run.sim_kwargs or {}),
+            "summaries_kwargs": (run.summaries_kwargs or {}),
         }
         if ep["simulate"] and ep["summaries"] and run.outdir:
             Path(run.outdir, "entrypoints.json").write_text(json.dumps(ep, indent=2))
