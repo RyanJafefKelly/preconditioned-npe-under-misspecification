@@ -209,8 +209,8 @@ results/
 *.sage.py
 
 # PBS
-**/*.o[0-9]*         # e.g., jobname.o12030731 or .o12030731.96
-**/*.e[0-9]*         # e.g., jobname.e12030731 or .e12030731.96
+*.o[0-9]*
+*.e[0-9]*
 
 logs/
 **/logs/
