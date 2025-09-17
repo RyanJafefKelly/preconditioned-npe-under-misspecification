@@ -28,6 +28,7 @@ class Args:
     verbose: bool = True
     debug_runs: int = 0  # print debug for first N runs per method
 
+
 # ------------------------ Utilities ------------------------
 
 _METHODS_ORDER = ("npe", "pnpe", "rnpe", "prnpe")
@@ -160,45 +161,46 @@ def _first_array_from_npz(path: Path) -> np.ndarray | None:
 def _get_theta_target(
     run_dir: Path, flat_md: dict[str, Any], theta_dim: int
 ) -> np.ndarray | None:
-    # Look in metrics.json first (various spellings)
-    for key in flat_md:
+    # metrics.json → various spellings; accept list or space/comma-separated string
+    for key, val in flat_md.items():
         lk = key.lower()
         if any(
-            val = flat_md[key]
-            if any(
-                tk in lk
-                for tk in (
-                    "theta_target",
-                    "theta.dagger",
-                    "theta_dagger",
-                    "target_theta",
-                    "theta*",
-                )
+            tk in lk
+            for tk in (
+                "theta_target",
+                "theta.dagger",
+                "theta_dagger",
+                "target_theta",
+                "theta*",
             )
         ):
             if isinstance(val, (list, tuple)):
                 arr = np.asarray(val, dtype=float).reshape(-1)
             elif isinstance(val, str):
                 try:
-                    arr = np.asarray([float(t) for t in re.split(r"[,\s]+", val.strip()) if t], dtype=float)
+                    arr = np.asarray(
+                        [float(t) for t in re.split(r"[,\s]+", val.strip()) if t],
+                        dtype=float,
+                    )
                 except Exception:
                     continue
             else:
                 continue
             if arr.size == theta_dim:
                 return arr
+
     # Fallback: config.json → run_cfg.theta_true
     cfg = run_dir / "config.json"
     if cfg.exists():
         try:
             jd = _read_json(cfg)
             flat = _flatten(jd)
-            for key, val in flat.items():
-                lk = key.lower()
+            for k, v in flat.items():
+                lk = k.lower()
                 if "run_cfg.theta_true" in lk.replace(" ", "") and isinstance(
-                    val, (list, tuple)
+                    v, (list, tuple)
                 ):
-                    arr = np.asarray(val, dtype=float).reshape(-1)
+                    arr = np.asarray(v, dtype=float).reshape(-1)
                     if arr.size == theta_dim:
                         return arr
         except Exception:
@@ -250,94 +252,38 @@ def _coverage_and_mse_from_samples(
 
 
 def _parse_metrics(md: dict[str, Any]) -> dict[str, Any]:
-    """Schema-agnostic parse. Returns: hpdi_cov, central_cov, bias, mse, logprob, ppd_median."""
-    out: Dict[str, Any] = {}
+    """Schema-agnostic parse tuned to SVAR metrics.json."""
+    out: dict[str, Any] = {}
     flat = _flatten(md)
     flat_l = {k.lower(): v for k, v in flat.items()}
 
-    def _find_vec(
-        keys_any: Iterable[str], keys_all: Iterable[str] = (), length_at_least: int = 1
-    ) -> np.ndarray | None:
-        for k, v in flat_l.items():
-            if not isinstance(v, (list, tuple, np.ndarray)):
-                continue
-            s = k
-            if any(a in s for a in keys_any) and all(a in s for a in keys_all):
-                arr = np.asarray(v)
-                if arr.size >= length_at_least and arr.ndim >= 1:
-                    return arr.astype(float).reshape(-1)
+    def _find_vec_exact(keys: list[str]) -> np.ndarray | None:
+        for key in keys:
+            if key in flat_l and isinstance(flat_l[key], (list, tuple, np.ndarray)):
+                return np.asarray(flat_l[key], dtype=float).reshape(-1)
         return None
 
-    def _find_scalar(keys_all: Iterable[str]) -> Optional[float]:
-        best = None
-        for k, v in flat_l.items():
-            if isinstance(v, (int, float)) and all(a in k for a in keys_all):
-                best = float(v)
-        return best
-
-    def _find_array(keys_any: Iterable[str], keys_all: Iterable[str] = ()) -> np.ndarray | None:
-        for k, v in flat_l.items():
-            if isinstance(v, (list, tuple, np.ndarray)):
-                s = k
-                if all(a in s for a in keys_all) and all(a in s for a in keys_any):
-                    arr = np.asarray(v, dtype=float).reshape(-1)
-                    if arr.size:
-                        return arr
+    def _find_scalar_exact(keys: list[str]) -> float | None:
+        for key in keys:
+            if key in flat_l and isinstance(flat_l[key], (int, float)):
+                return float(flat_l[key])
         return None
 
-
-    # coverage
-    hpdi_cov = (
-        _coerce_bool_array(_find_vec(keys_any=("hpdi",), keys_all=("cover",)))
-        or _coerce_bool_array(_find_vec(keys_any=("hpdi",), keys_all=("contains",)))
-        or _coerce_bool_array(_find_vec(keys_any=("coverage", "hpdi"), keys_all=()))
-    )
-    central_cov = (
-        _coerce_bool_array(_find_vec(keys_any=("central",), keys_all=("cover",)))
-        or _coerce_bool_array(_find_vec(keys_any=("central",), keys_all=("contains",)))
-        or _coerce_bool_array(_find_vec(keys_any=("coverage", "central"), keys_all=()))
-    )
+    # coverage vectors (booleans)
+    hpdi_cov = _coerce_bool_array(_find_vec_exact(["hit_hpdi"]))
+    central_cov = _coerce_bool_array(_find_vec_exact(["hit_central"]))
 
     # bias and MSE vectors
-    bias = _as_float_array(_find_vec(keys_any=("bias",), keys_all=()))
-    mse = _as_float_array(
-        _find_vec(keys_any=("mse", "mean_squared", "squared_error"), keys_all=())
-    )
+    bias = _as_float_array(_find_vec_exact(["bias"]))
+    mse = _as_float_array(_find_vec_exact(["post_mse", "mse"]))
 
-    # log-probability at target
-    logprob = None
-    # prefer target-specific keys if present
-    for keys in (
-        ("log", "prob", "target"),
-        ("log", "lik", "target"),
-        ("logp", "target"),
-        ("lp", "target"),
-        ("synlik", "target"),
-        ("log", "density", "target"),
-    ):
-        v = _find_scalar(keys_all=keys)
-        if v is not None:
-            logprob = v
-            break
-    if logprob is None:
-        logprob = _find_scalar(keys_all=("log", "prob"))
+    # log-probability at target θ
+    logprob = _find_scalar_exact(["post_logpdf_at_theta"]) or _find_scalar_exact(
+        ["post_logpdf_quantiles.q50"]
+    )  # median as fallback
 
-    # posterior predictive distance median
-    ppd_median = None
-    for keys in (("ppd", "median"), ("ppd", "l2", "median"), ("ppc", "median")):
-        v = _find_scalar(keys_all=keys)
-        if v is not None:
-            ppd_median = v
-            break
-    if ppd_median is None:
-        # derive median from arrays if present
-        arr = (
-            _find_array(keys_any=("ppd", "l2"), keys_all=())
-            or _find_array(keys_any=("ppd", "dist"), keys_all=())
-            or _find_array(keys_any=("ppc", "l2"), keys_all=())
-        )
-        if arr is not None and arr.size:
-            ppd_median = float(np.median(arr))
+    # posterior predictive distance (median)
+    ppd_median = _find_scalar_exact(["ppd_q50", "ppd_median"])
 
     out["hpdi_cov"] = hpdi_cov
     out["central_cov"] = central_cov
