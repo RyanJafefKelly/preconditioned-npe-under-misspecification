@@ -24,7 +24,7 @@ fi
 : "${PRECOND_METHOD:=none}"              # none | rejection | smc_abc
 : "${Q_PRECOND:=1.0}"
 
-GROUP="th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
+GROUP="th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}"
 OUTDIR="results/gnk/npe/${GROUP}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
 

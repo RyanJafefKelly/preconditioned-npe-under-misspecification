@@ -32,7 +32,7 @@ fi
 : "${SMC_C_TUNING:=0.01}"
 : "${SMC_B_SIM:=1}"
 
-GROUP="th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
+GROUP="th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}"
 OUTDIR="results/gnk/pnpe/${GROUP}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
 
@@ -98,4 +98,9 @@ uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --level 0.95 \
   --want-hpdi \
   --want-central \
-  --method PNPE
+  --method PNPE \
+  --compute-ppd \
+  --ppd-entrypoints "$OUTDIR/entrypoints.json" \
+  --ppd-n 1000 \
+  --ppd-metric l2
+

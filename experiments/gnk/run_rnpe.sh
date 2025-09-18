@@ -105,4 +105,9 @@ uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --level 0.95 \
   --want-hpdi \
   --want-central \
-  --method RNPE
+  --method RNPE \
+  --compute-ppd \
+  --ppd-entrypoints "$OUTDIR/entrypoints.json" \
+  --ppd-n 1000 \
+  --ppd-metric l2
+

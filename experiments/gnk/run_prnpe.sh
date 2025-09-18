@@ -32,7 +32,7 @@ fi
 : "${SMC_C_TUNING:=0.01}"
 : "${SMC_B_SIM:=1}"
 
-OUTDIR="results/gnk/prnpe/th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}-q_${Q_PRECOND}/seed-${SEED}/${DATE}"
+OUTDIR="results/gnk/prnpe/th_$(printf 'A%s_B%s_g%s_k%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-n_sims_${N_SIMS}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
 
 # Posterior draws
@@ -128,6 +128,6 @@ uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --want-central \
   --method PRNPE \
   --compute-ppd \
+  --ppd-entrypoints "$OUTDIR/entrypoints.json" \
   --ppd-n 1000 \
-  --ppd-metric l2 \
-  --example gnk
+  --ppd-metric l2
