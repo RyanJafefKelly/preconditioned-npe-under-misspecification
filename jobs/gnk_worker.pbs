@@ -1,0 +1,52 @@
+#!/bin/bash -l
+#PBS -N gnk_worker
+#PBS -l walltime=02:00:00
+#PBS -l mem=12GB
+#PBS -l ncpus=1
+#PBS -j oe
+
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+
+# Tools/env
+export PATH="$HOME/.local/bin:$PATH"
+export UV_CACHE_DIR="${SCRATCH:-$HOME}/.cache/uv"
+export UV_PROJECT_ENVIRONMENT="$PBS_O_WORKDIR/.venv"
+which uv >/dev/null 2>&1 || { echo "uv missing"; exit 127; }
+
+# Inputs from array launcher
+R=${R:-100}
+METHODS_STR=${METHODS_STR:-"npe rnpe pnpe prnpe"}
+OBS_SEED_OFFSET=${OBS_SEED_OFFSET:-1234}
+
+# Derive (method, seed) from array index
+IDX=${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-0}}
+IFS=' ' read -r -a METHODS <<< "$METHODS_STR"
+M=${#METHODS[@]}
+R_TOTAL=$((R * M))
+(( IDX >= 0 && IDX < R_TOTAL )) || { echo "Bad array index $IDX (R=$R M=$M)"; exit 2; }
+MID=$(( IDX / R ))
+RID=$(( IDX % R ))
+METHOD="${METHODS[$MID]}"
+export SEED="${RID}"
+export OBS_SEED="$(( SEED + OBS_SEED_OFFSET ))"
+
+# Freeze method config
+source configs/gnk/method_matrix.sh
+gnk_set_method_env "$METHOD"
+
+echo "[env] host=$(hostname) jobid=${PBS_JOBID} idx=${IDX} method=${METHOD} rep=${RID}"
+mkdir -p "logs/gnk"
+
+# Run the selected method
+case "$METHOD" in
+  npe|rnpe|pnpe|prnpe)
+    bash "experiments/gnk/run_${METHOD}.sh" 2>&1 | tee "logs/gnk/${METHOD}_rep${RID}.log"
+    ;;
+  *)
+    echo "Unknown method: $METHOD" >&2; exit 3 ;;
+esac
+
+# Done marker
+mkdir -p "results/_done"
+echo "$(date) method=$METHOD rep=$RID ok" > "results/_done/gnk_${METHOD}_rep${RID}.ok"
