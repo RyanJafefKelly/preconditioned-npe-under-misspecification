@@ -140,11 +140,13 @@ def posterior_predictive_distance_on_summaries(
         return jnp.linalg.norm(d, ord=2) if metric == "l2" else jnp.sum(jnp.abs(d))
 
     dists = jax.vmap(_one)(keys, th)
+    finite = jnp.isfinite(dists)
+    dists_f = dists[finite]
     return {
-        "ppd_mean": float(jnp.mean(dists)),
-        "ppd_sd": float(jnp.std(dists, ddof=1)),
-        "ppd_q50": float(jnp.quantile(dists, 0.5)),
-        "ppd_q90": float(jnp.quantile(dists, 0.9)),
+        "ppd_mean": float(jnp.mean(dists_f)),
+        "ppd_sd": float(jnp.std(dists_f, ddof=1)),
+        "ppd_q50": float(jnp.quantile(dists_f, 0.5)),
+        "ppd_q90": float(jnp.quantile(dists_f, 0.9)),
     }
 
 
