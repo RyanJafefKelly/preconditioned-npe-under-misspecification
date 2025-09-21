@@ -1,49 +1,53 @@
 #!/bin/bash -l
 #PBS -N weibull_worker
+#PBS -j oe
 #PBS -l walltime=02:00:00
 #PBS -l mem=12GB
 #PBS -l ncpus=1
-#PBS -j oe
 
 set -euo pipefail
 cd "$PBS_O_WORKDIR"
 
-# tools/env
+# Tools/env
 export PATH="$HOME/.local/bin:$PATH"
 export UV_CACHE_DIR="${SCRATCH:-$HOME}/.cache/uv"
 export UV_PROJECT_ENVIRONMENT="$PBS_O_WORKDIR/.venv"
 which uv >/dev/null 2>&1 || { echo "uv missing"; exit 127; }
-export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 
-# inputs from array launcher
+# Decode CSV inputs from launcher
+METHODS_STR_CSV=${METHODS_STR_CSV:-"npe,rnpe,pnpe,prnpe"}
+IFS=',' read -r -a _METHODS_ARR <<< "$METHODS_STR_CSV"
+METHODS_STR="${_METHODS_ARR[*]}"         # space separated for local logic
+
+THETA_TRUE_CSV=${THETA_TRUE_CSV:-"0.8,2.0"}
+THETA_TRUE_SPACES=$(tr ',' ' ' <<<"$THETA_TRUE_CSV")
+export THETA="$THETA_TRUE_SPACES"
+export THETA_TRUE="$THETA_TRUE_SPACES"
+
+# Derive (method, seed) from array index
 R=${R:-100}
-METHODS_STR=${METHODS_STR:-"npe rnpe pnpe prnpe"}
-OBS_SEED_OFFSET=${OBS_SEED_OFFSET:-1234}
-
-# derive (method, seed) from array index
 IDX=${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-0}}
-IFS=' ' read -r -a METHODS <<< "$METHODS_STR"
-M=${#METHODS[@]}
+M=${#_METHODS_ARR[@]}
 R_TOTAL=$((R * M))
 (( IDX >= 0 && IDX < R_TOTAL )) || { echo "Bad array index $IDX (R=$R M=$M)"; exit 2; }
 MID=$(( IDX / R ))
 RID=$(( IDX % R ))
-METHOD="${METHODS[$MID]}"
+METHOD="${_METHODS_ARR[$MID]}"
 export SEED="${RID}"
-export OBS_SEED="$(( SEED + OBS_SEED_OFFSET ))"
+export OBS_SEED="$(( SEED + ${OBS_SEED_OFFSET:-1234} ))"
 
 echo "[env] host=$(hostname) jobid=${PBS_JOBID} idx=${IDX} method=${METHOD} rep=${RID}"
-mkdir -p "logs/contaminated_weibull"
+mkdir -p "logs/weibull"
 
-# run
+# Run selected method
 case "$METHOD" in
   npe|rnpe|pnpe|prnpe)
-    bash "experiments/contaminated_weibull/run_${METHOD}.sh" 2>&1 | tee "logs/contaminated_weibull/${METHOD}_rep${RID}.log"
+    bash "experiments/contaminated_weibull/run_${METHOD}.sh" 2>&1 | tee "logs/weibull/${METHOD}_rep${RID}.log"
     ;;
   *)
     echo "Unknown method: $METHOD" >&2; exit 3 ;;
 esac
 
-# done marker
+# Done marker
 mkdir -p "results/_done"
-echo "$(date) method=$METHOD rep=$RID ok" > "results/_done/weibull_${METHOD}_rep${RID}.ok"
+echo "$(date) method=$METHOD rep=$RID ok" > "results/_done/${METHOD}_rep${RID}.ok"
