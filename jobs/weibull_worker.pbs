@@ -15,14 +15,10 @@ export UV_PROJECT_ENVIRONMENT="$PBS_O_WORKDIR/.venv"
 which uv >/dev/null 2>&1 || { echo "uv missing"; exit 127; }
 
 # Decode CSV inputs from launcher
-METHODS_STR_CSV=${METHODS_STR_CSV:-"npe,rnpe,pnpe,prnpe"}
-IFS=',' read -r -a _METHODS_ARR <<< "$METHODS_STR_CSV"
-METHODS_STR="${_METHODS_ARR[*]}"         # space separated for local logic
-
-THETA_TRUE_CSV=${THETA_TRUE_CSV:-"0.8,2.0"}
-THETA_TRUE_SPACES=$(tr ',' ' ' <<<"$THETA_TRUE_CSV")
-export THETA="$THETA_TRUE_SPACES"
-export THETA_TRUE="$THETA_TRUE_SPACES"
+METHODS_STR=${METHODS_STR:-"npe rnpe pnpe prnpe"}
+IFS=' ' read -r -a _METHODS_ARR <<< "$METHODS_STR"
+export THETA_TRUE="${THETA_TRUE:-0.8 2.0}"
+export THETA="$THETA_TRUE"
 
 # Derive (method, seed) from array index
 R=${R:-100}
