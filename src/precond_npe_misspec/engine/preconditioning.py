@@ -58,6 +58,14 @@ def _make_dataset(
 
     thetas = jnp.concatenate(th_parts, axis=0)
     S = jnp.concatenate(S_parts, axis=0)
+
+    mask_theta = jnp.all(jnp.isfinite(thetas), axis=1)
+    mask_S = jnp.all(jnp.isfinite(S), axis=1)
+    mask = mask_theta & mask_S
+
+    thetas = thetas[mask]
+    S = S[mask]
+
     return thetas, S
 
 
@@ -158,6 +166,8 @@ def run_preconditioning(
             batch_size=batch_size,
             sim_kwargs=sim_kwargs,
         )
+        theta_train = theta_train.astype(jnp.float32)
+        S_train = S_train.astype(jnp.float32)
         print(f"Preconditioning: none    | training pairs: {int(theta_train.shape[0])}")
         return theta_train, S_train
 
@@ -169,7 +179,7 @@ def run_preconditioning(
             assert S_pilot is not None
             dist_fn = spec.make_distance(S_pilot)
         key, k_abc = jax.random.split(key)
-        return _abc_rejection_with_sim(
+        th, S = _abc_rejection_with_sim(
             spec,
             k_abc,
             s_obs,
@@ -179,6 +189,7 @@ def run_preconditioning(
             batch_size=batch_size,
             sim_kwargs=sim_kwargs,
         )
+        return th.astype(jnp.float32), S.astype(jnp.float32)
 
     if method == "smc_abc":
         key, k_smc = jax.random.split(key)
@@ -198,6 +209,8 @@ def run_preconditioning(
             sim_kwargs=sim_kwargs,
             S_pilot_for_distance=S_pilot,
         )
+        theta_particles = theta_particles.astype(jnp.float32)
+        S_particles = S_particles.astype(jnp.float32)
         print(f"Preconditioning: smc_abc | particles: {int(theta_particles.shape[0])}")
         return theta_particles, S_particles
 

@@ -58,8 +58,12 @@ def fit_posterior_flow(
     Flow samples accept whitened s via 'condition'.
     """
     # Standardise summaries for conditioning stability
-    S_mean = jnp.mean(S_train, axis=0)
-    S_std = jnp.std(S_train, axis=0) + EPS
+    raw_mean = jnp.mean(S_train, axis=0)
+    raw_std = jnp.std(S_train, axis=0)
+    cap = jnp.asarray(1e30, dtype=raw_std.dtype)
+    S_mean = jnp.clip(raw_mean, a_min=-cap, a_max=cap)
+    S_std = jnp.clip(raw_std, a_min=None, a_max=cap) + EPS
+
     S_proc = _standardise(S_train, S_mean, S_std)
 
     k_build, k_fit = jax.random.split(key)

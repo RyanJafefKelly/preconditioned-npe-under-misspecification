@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from pathlib import Path as _Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import jax
 import jax.numpy as jnp
@@ -13,9 +13,12 @@ import numpy as _np
 
 from precond_npe_misspec.utils.artifacts import save_artifacts
 
+from .npe_rs import LossHistory, fit_posterior_flow_npe_rs
 from .posterior import fit_posterior_flow, sample_posterior
 from .preconditioning import run_preconditioning
 from .robust import denoise_s, fit_s_flow, sample_robust_posterior
+
+type Array = jax.Array
 
 
 @dataclass(frozen=True)
@@ -37,7 +40,7 @@ class PrecondConfig:
 
 @dataclass(frozen=True)
 class PosteriorConfig:
-    method: Literal["npe", "rnpe"] = "rnpe"
+    method: Literal["npe", "rnpe", "npe_rs"] = "rnpe"
     n_posterior_draws: int = 20_000
 
 
@@ -59,6 +62,21 @@ class RobustConfig:
 
 
 @dataclass(frozen=True)
+class NpeRsConfig:
+    """Config for NPE‑RS."""
+
+    embed_dim: int = 16
+    embed_width: int = 128
+    embed_depth: int = 2
+    activation: Literal["relu", "tanh"] = "relu"
+    mmd_weight: float = 1.0
+    kernel: Literal["rbf", "imq"] = "rbf"
+    mmd_subsample: int | None = 256
+    bandwidth: float | Literal["median"] = "median"
+    warmup_epochs: int = 0
+
+
+@dataclass(frozen=True)
 class RunConfig:
     seed: int = 0
     obs_seed: int = 1234
@@ -70,6 +88,7 @@ class RunConfig:
     posterior: PosteriorConfig = field(default_factory=PosteriorConfig)
     batch_size: int = 512
     robust: RobustConfig = field(default_factory=RobustConfig)
+    npers: NpeRsConfig = field(default_factory=NpeRsConfig)
 
 
 @dataclass
@@ -102,17 +121,42 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
     rng, k_pre = jax.random.split(rng)
     theta_tr, S_tr = run_preconditioning(k_pre, spec, s_obs, run, flow_cfg)
 
-    # Fit q(theta | s)
+    # Fit q(theta | s) or q(theta | eta(s)) depending on method
     rng, k_fit = jax.random.split(rng)
-    q_theta_s, S_mean, S_std, th_mean, th_std, losses_theta = fit_posterior_flow(k_fit, spec, theta_tr, S_tr, flow_cfg)
-    s_obs_w = (s_obs - S_mean) / (S_std + 1e-8)
-    S_tr_w = (S_tr - S_mean) / (S_std + 1e-8)
-    print("s_obs_w: ", s_obs_w)
+    if run.posterior.method == "npe_rs":
+        rng, k_sim = jax.random.split(rng)
 
-    # NPE sampling
-    if run.posterior.method == "npe":
+        def _sim_one(k: Array, th: Array) -> Array:
+            return cast(Array, spec.simulate(k, th, **(run.sim_kwargs or {})))
+
+        keys = jax.random.split(k_sim, theta_tr.shape[0])
+        X_tr = jax.vmap(_sim_one)(keys, theta_tr)
+        q_theta_s_rs, X_mean, X_std, th_mean, th_std, losses_theta = fit_posterior_flow_npe_rs(
+            k_fit, spec, theta_tr, X_tr, x_obs, flow_cfg, run.npers
+        )
+        q_theta_s = cast(Any, q_theta_s_rs)
+        # For downstream compatibility, reuse S_* slots for x-whitening stats.
+        S_mean, S_std = X_mean, X_std
+
+    else:
+        q_theta_s_std, S_mean, S_std, th_mean, th_std, losses_list = fit_posterior_flow(
+            k_fit, spec, theta_tr, S_tr, flow_cfg
+        )
+        q_theta_s = cast(Any, q_theta_s_std)
+        losses_theta = cast(LossHistory, {"nll": list(losses_list)})
+    if run.posterior.method == "npe_rs":
+        x_obs_w = (x_obs - X_mean) / (X_std + 1e-8)
+        print("x_obs_w: ", x_obs_w)
+    else:
+        s_obs_w = (s_obs - S_mean) / (S_std + 1e-8)
+        S_tr_w = (S_tr - S_mean) / (S_std + 1e-8)
+        print("s_obs_w: ", s_obs_w)
+
+    # NPE/NPE-RS sampling
+    if run.posterior.method in ("npe", "npe_rs"):
         rng, k_post = jax.random.split(rng)
-        theta_samps = sample_posterior(k_post, q_theta_s, s_obs_w, run.posterior.n_posterior_draws)
+        condition_vec = x_obs_w if run.posterior.method == "npe_rs" else s_obs_w
+        theta_samps = sample_posterior(k_post, q_theta_s, condition_vec, run.posterior.n_posterior_draws)
 
         res = Result(
             theta_train=theta_tr,
@@ -127,7 +171,7 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             posterior_samples_at_obs=theta_samps,
             loss_history_theta=losses_theta,
         )
-    else:
+    elif run.posterior.method == "rnpe":
         # RNPE: fit q(s), denoise, then mix q(theta|s)
         rng, k_sfit = jax.random.split(rng)
         q_s_w, _ = fit_s_flow(k_sfit, spec.s_dim, S_tr_w, flow_cfg)
@@ -161,6 +205,8 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             denoised_s_samples=s_denoised_w,
             misspec_probs=misspec_probs,
         )
+    else:
+        raise ValueError(f"Unknown posterior.method: {run.posterior.method!r}")
 
     # Persist artefacts for metrics script
     if run.outdir:
@@ -177,7 +223,7 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             flow_cfg=asdict(flow_cfg),
             posterior_flow=res.posterior_flow,
             s_obs=res.s_obs,
-            posterior_samples=(res.posterior_samples_at_obs if run.posterior.method == "npe" else None),
+            posterior_samples=(res.posterior_samples_at_obs if run.posterior.method in ("npe", "npe_rs") else None),
             robust_posterior_samples=(res.posterior_samples_at_obs if run.posterior.method == "rnpe" else None),
             theta_acc=res.theta_train,
             S_acc=res.S_train,
