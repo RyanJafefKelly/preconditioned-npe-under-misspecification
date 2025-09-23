@@ -8,14 +8,26 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from precond_npe_misspec.engine.run import PosteriorConfig, PrecondConfig, RobustConfig, RunConfig, run_experiment
+from precond_npe_misspec.engine.run import (
+    NpeRsConfig,
+    PosteriorConfig,
+    PrecondConfig,
+    RobustConfig,
+    RunConfig,
+    run_experiment,
+)
+from precond_npe_misspec.examples.embeddings import build as get_embedder
 from precond_npe_misspec.examples.svar import assumed_dgp as svar_assumed_dgp
 from precond_npe_misspec.examples.svar import default_pairs
 from precond_npe_misspec.examples.svar import prior_logpdf as svar_prior_logpdf
 from precond_npe_misspec.examples.svar import prior_sample as svar_prior_sample
 from precond_npe_misspec.examples.svar import summaries as svar_summaries
 from precond_npe_misspec.examples.svar import true_dgp as svar_true_dgp
-from precond_npe_misspec.pipelines.base_pnpe import ExperimentSpec, FlowConfig, default_posterior_flow_builder
+from precond_npe_misspec.pipelines.base_pnpe import (
+    ExperimentSpec,
+    FlowConfig,
+    default_posterior_flow_builder,
+)
 
 type Array = jax.Array
 
@@ -43,6 +55,7 @@ class Config:
     posterior: PosteriorConfig = PosteriorConfig()
     robust: RobustConfig = RobustConfig()
     flow: FlowConfig = FlowConfig()
+    npers: NpeRsConfig = NpeRsConfig()
 
 
 def _make_spec(cfg: Config) -> ExperimentSpec:
@@ -92,6 +105,7 @@ def _make_spec(cfg: Config) -> ExperimentSpec:
         theta_hi=jnp.ones(7),
         simulate_path="precond_npe_misspec.examples.svar:simulate",
         summaries_path="precond_npe_misspec.examples.svar:summaries_for_metrics",
+        build_embedder=get_embedder("tcn_small"),
         # leave theta bounds None → train in unconstrained space
     )
 
@@ -144,6 +158,7 @@ def main(cfg: Config) -> None:
             posterior=cfg.posterior,
             robust=cfg.robust,
             batch_size=cfg.flow.batch_size,
+            npers=cfg.npers,
         ),
         cfg.flow,
     )

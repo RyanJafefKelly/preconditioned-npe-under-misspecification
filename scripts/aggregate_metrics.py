@@ -1,15 +1,16 @@
 #!/usr/bin/env python
 from __future__ import annotations
 
-import json, math, re
+import json
+import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast, Iterable
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 import tyro
-
 
 # ---------- CLI ----------
 
@@ -24,9 +25,7 @@ class Args:
     decimals: int = 2
     verbose: bool = True
     debug_runs: int = 0
-    param_labels: tuple[str, ...] | None = (
-        None  # override row labels, e.g. ("A","B","g","k")
-    )
+    param_labels: tuple[str, ...] | None = None  # override row labels, e.g. ("A","B","g","k")
 
 
 # ---------- Utilities ----------
@@ -121,9 +120,7 @@ def _first_array_from_npz(path: Path) -> np.ndarray | None:
     return None
 
 
-def _find_theta_labels(
-    run_dir: Path, theta_dim: int, override: tuple[str, ...] | None
-) -> list[str]:
+def _find_theta_labels(run_dir: Path, theta_dim: int, override: tuple[str, ...] | None) -> list[str]:
     if override and len(override) == theta_dim:
         return list(override)
     for fname in ("metrics.json", "artifacts.json"):
@@ -131,22 +128,18 @@ def _find_theta_labels(
         if f.exists():
             try:
                 d = _read_json(f)
-                labels = d.get("theta_labels") or (d.get("spec") or {}).get(
-                    "theta_labels"
-                )
+                labels = d.get("theta_labels") or (d.get("spec") or {}).get("theta_labels")
                 if labels and len(labels) == theta_dim:
                     return list(labels)
             except Exception:
                 pass
-    return [f"p{i+1}" for i in range(theta_dim)]
+    return [f"p{i + 1}" for i in range(theta_dim)]
 
 
 # ---------- Target + coverage helpers ----------
 
 
-def _get_theta_target(
-    run_dir: Path, flat_md: dict[str, Any], theta_dim: int
-) -> np.ndarray | None:
+def _get_theta_target(run_dir: Path, flat_md: dict[str, Any], theta_dim: int) -> np.ndarray | None:
     for key, val in flat_md.items():
         lk = key.lower()
         if any(
@@ -159,7 +152,7 @@ def _get_theta_target(
                 "theta*",
             )
         ):
-            if isinstance(val, (list, tuple)):
+            if isinstance(val, (list | tuple)):
                 arr = np.asarray(val, dtype=float).reshape(-1)
             elif isinstance(val, str):
                 try:
@@ -180,9 +173,7 @@ def _get_theta_target(
             flat = _flatten(jd)
             for k, v in flat.items():
                 lk = k.lower()
-                if "run_cfg.theta_true" in lk.replace(" ", "") and isinstance(
-                    v, (list, tuple)
-                ):
+                if "run_cfg.theta_true" in lk.replace(" ", "") and isinstance(v, (list | tuple)):
                     arr = np.asarray(v, dtype=float).reshape(-1)
                     if arr.size == theta_dim:
                         return arr
@@ -195,7 +186,7 @@ def _hpdi_contains(x: np.ndarray, target: float, level: float) -> float:
     x = np.sort(np.asarray(x, dtype=float).reshape(-1))
     n = x.size
     if n == 0:
-        return np.nan
+        return float("nan")
     k = int(np.ceil(level * n))
     widths = x[k - 1 :] - x[: n - k + 1]
     j = int(np.argmin(widths))
@@ -235,14 +226,14 @@ def _parse_metrics(md: dict[str, Any]) -> dict[str, Any]:
     def _vec(keys: list[str]) -> np.ndarray | None:
         for key in keys:
             v = flat_l.get(key)
-            if isinstance(v, (list, tuple, np.ndarray)):
+            if isinstance(v, (list | tuple | np.ndarray)):
                 return np.asarray(v, dtype=float).reshape(-1)
         return None
 
     def _scalar(keys: list[str]) -> float | None:
         for key in keys:
             v = flat_l.get(key)
-            if isinstance(v, (int, float)):
+            if isinstance(v, (int | float)):
                 return float(v)
         return None
 
@@ -255,9 +246,7 @@ def _parse_metrics(md: dict[str, Any]) -> dict[str, Any]:
     mse = _as_float_array(_vec(["post_mse", "mse"]))
 
     # Log probability at θ_target
-    logprob = _scalar(["post_logpdf_at_theta"]) or _scalar(
-        ["post_logpdf_quantiles.q50"]
-    )
+    logprob = _scalar(["post_logpdf_at_theta"]) or _scalar(["post_logpdf_quantiles.q50"])
 
     # PPD median
     ppd_median = _scalar(["ppd_q50", "ppd_median"])
@@ -303,9 +292,7 @@ def _aggregate(args: Args) -> None:
         groups_used[m] = g
         gdir = mdir / g
         seeds: dict[int, Path] = {}
-        for sdir in sorted(
-            p for p in gdir.iterdir() if p.is_dir() and p.name.startswith("seed-")
-        ):
+        for sdir in sorted(p for p in gdir.iterdir() if p.is_dir() and p.name.startswith("seed-")):
             mobj = re.match(r"seed-(\d+)", sdir.name)
             if not mobj:
                 continue
@@ -325,6 +312,22 @@ def _aggregate(args: Args) -> None:
     logprob: dict[str, list[float]] = {m: [] for m in methods}
     ppd_med: dict[str, list[float]] = {m: [] for m in methods}
 
+    def _append_array(
+        dst: dict[str, list[np.ndarray]],
+        *,
+        method: str,
+        parsed: dict[str, Any],
+        key: str,
+        theta_dim: int,
+        md_path: Path,
+    ) -> None:
+        arr = parsed.get(key)
+        if isinstance(arr, np.ndarray):
+            if arr.size != theta_dim:
+                print(f"[warn] {key} shape {arr.size} != theta_dim {theta_dim} at {md_path}")
+            else:
+                dst[method].append(arr.astype(float))
+
     for m in methods:
         dbg_left = args.debug_runs
         for seed, run_dir in sorted(chosen[m].items()):
@@ -343,33 +346,22 @@ def _aggregate(args: Args) -> None:
                         theta_dim = int(arr.size)
                         break
                 if theta_dim is None:
-                    raise RuntimeError(
-                        "Could not infer theta_dim from metrics.json files."
-                    )
+                    raise RuntimeError("Could not infer theta_dim from metrics.json files.")
                 labels = _find_theta_labels(run_dir, theta_dim, args.param_labels)
 
             # Fallbacks via samples if needed
-            need_cov = not isinstance(
-                parsed.get("hpdi_cov"), np.ndarray
-            ) or not isinstance(parsed.get("central_cov"), np.ndarray)
+            need_cov = not isinstance(parsed.get("hpdi_cov"), np.ndarray) or not isinstance(
+                parsed.get("central_cov"), np.ndarray
+            )
             need_mse = not isinstance(parsed.get("mse"), np.ndarray)
             if need_cov or need_mse:
                 samps = _first_array_from_npz(run_dir / "posterior_samples.npz")
                 if samps is None:
-                    samps = _first_array_from_npz(
-                        run_dir / "posterior_samples_robust.npz"
-                    )
-                if (
-                    samps is not None
-                    and samps.ndim == 2
-                    and theta_dim is not None
-                    and samps.shape[1] == theta_dim
-                ):
+                    samps = _first_array_from_npz(run_dir / "posterior_samples_robust.npz")
+                if samps is not None and samps.ndim == 2 and theta_dim is not None and samps.shape[1] == theta_dim:
                     tgt = _get_theta_target(run_dir, _flatten(md), theta_dim)
                     if tgt is not None:
-                        hpdi_v, cent_v, mse_v = _coverage_and_mse_from_samples(
-                            samps, tgt, args.level
-                        )
+                        hpdi_v, cent_v, mse_v = _coverage_and_mse_from_samples(samps, tgt, args.level)
                         if need_cov:
                             parsed["hpdi_cov"], parsed["central_cov"] = hpdi_v, cent_v
                         if need_mse:
@@ -379,24 +371,22 @@ def _aggregate(args: Args) -> None:
                 elif args.verbose:
                     print(f"[info] samples not found/bad shape in {run_dir}")
 
-            def _push(dst: dict[str, list[np.ndarray]], key: str):
-                arr = parsed.get(key)
-                if isinstance(arr, np.ndarray):
-                    if arr.size != theta_dim:
-                        print(
-                            f"[warn] {key} shape {arr.size} != theta_dim {theta_dim} at {md_path}"
-                        )
-                    else:
-                        dst[m].append(arr.astype(float))
+            assert theta_dim is not None
+            _append_array(cov_hpdi, method=m, parsed=parsed, key="hpdi_cov", theta_dim=theta_dim, md_path=md_path)
+            _append_array(
+                cov_central,
+                method=m,
+                parsed=parsed,
+                key="central_cov",
+                theta_dim=theta_dim,
+                md_path=md_path,
+            )
+            _append_array(bias, method=m, parsed=parsed, key="bias", theta_dim=theta_dim, md_path=md_path)
+            _append_array(mse, method=m, parsed=parsed, key="mse", theta_dim=theta_dim, md_path=md_path)
 
-            _push(cov_hpdi, "hpdi_cov")
-            _push(cov_central, "central_cov")
-            _push(bias, "bias")
-            _push(mse, "mse")
-
-            if isinstance(parsed.get("logprob"), (int, float)):
+            if isinstance(parsed.get("logprob"), (int | float)):
                 logprob[m].append(float(parsed["logprob"]))
-            if isinstance(parsed.get("ppd_median"), (int, float)):
+            if isinstance(parsed.get("ppd_median"), (int | float)):
                 ppd_med[m].append(float(parsed["ppd_median"]))
 
             if args.debug_runs > 0 and dbg_left > 0:
@@ -418,9 +408,7 @@ def _aggregate(args: Args) -> None:
         out: dict[str, np.ndarray] = {}
         for m in methods:
             arrs = d[m]
-            out[m] = (
-                np.vstack(arrs).mean(axis=0) if arrs else np.full(theta_dim, np.nan)
-            )
+            out[m] = np.vstack(arrs).mean(axis=0) if arrs else np.full(theta_dim, np.nan)
         return out
 
     cov_hpdi_mean = _stack_mean(cov_hpdi)
@@ -464,9 +452,7 @@ def _aggregate(args: Args) -> None:
 
     lvl_tag = str(int(round(args.level * 100)))
     out_dir.joinpath(f"coverage_hpdi_{lvl_tag}.csv").write_text(df_cov_hpdi.to_csv())
-    out_dir.joinpath(f"coverage_central_{lvl_tag}.csv").write_text(
-        df_cov_central.to_csv()
-    )
+    out_dir.joinpath(f"coverage_central_{lvl_tag}.csv").write_text(df_cov_central.to_csv())
     out_dir.joinpath("bias.csv").write_text(df_bias.to_csv())
     out_dir.joinpath("mse.csv").write_text(df_mse.to_csv())
     out_dir.joinpath("logprob.csv").write_text(df_logprob.to_csv())
@@ -491,9 +477,7 @@ def _aggregate(args: Args) -> None:
             out = out.replace(k, v)
         return out
 
-    def _df_to_latex(
-        df: pd.DataFrame, *, percent: bool, decimals: int, caption: str, label: str
-    ) -> str:
+    def _df_to_latex(df: pd.DataFrame, *, percent: bool, decimals: int, caption: str, label: str) -> str:
         cols = [str(c) for c in df.columns]
         colspec = "l" + "c" * len(cols)
         lines = [
@@ -513,11 +497,7 @@ def _aggregate(args: Args) -> None:
                 else:
                     x = float(v)
                     x = 100.0 * x if percent else x
-                    row.append(
-                        f"{int(round(x))}"
-                        if abs(x - round(x)) < 1e-12
-                        else f"{x:.{decimals}f}"
-                    )
+                    row.append(f"{int(round(x))}" if abs(x - round(x)) < 1e-12 else f"{x:.{decimals}f}")
             lines.append(" & ".join(row) + r" \\")
         lines += [r"\hline", r"\end{tabular}"]
         if caption:
@@ -527,25 +507,21 @@ def _aggregate(args: Args) -> None:
         lines.append(r"\end{table}")
         return "\n".join(lines)
 
-    def _write(
-        df: pd.DataFrame, name: str, caption: str, label: str, percent: bool = False
-    ):
-        tex = _df_to_latex(
-            df, percent=percent, decimals=args.decimals, caption=caption, label=label
-        )
+    def _write(df: pd.DataFrame, name: str, caption: str, label: str, percent: bool = False) -> None:
+        tex = _df_to_latex(df, percent=percent, decimals=args.decimals, caption=caption, label=label)
         out_dir.joinpath(name).write_text(tex)
 
     _write(
         df_cov_hpdi,
         f"coverage_hpdi_{lvl_tag}.tex",
-        f"{ex_name.upper()} marginal HPDI {int(args.level*100)}\\% coverage.",
+        f"{ex_name.upper()} marginal HPDI {int(args.level * 100)}\\% coverage.",
         f"tab:{ex_name}_cov_hpdi",
         percent=args.percent,
     )
     _write(
         df_cov_central,
         f"coverage_central_{lvl_tag}.tex",
-        f"{ex_name.upper()} marginal central {int(args.level*100)}\\% coverage.",
+        f"{ex_name.upper()} marginal central {int(args.level * 100)}\\% coverage.",
         f"tab:{ex_name}_cov_central",
         percent=args.percent,
     )

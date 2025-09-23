@@ -9,19 +9,9 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from precond_npe_misspec.engine.run import (
-    PosteriorConfig,
-    PrecondConfig,
-    RobustConfig,
-    RunConfig,
-    run_experiment,
-)
+from precond_npe_misspec.engine.run import PosteriorConfig, PrecondConfig, RobustConfig, RunConfig, run_experiment
 from precond_npe_misspec.examples import contaminated_weibull as cw
-from precond_npe_misspec.pipelines.base_pnpe import (
-    ExperimentSpec,
-    FlowConfig,
-    default_posterior_flow_builder,
-)
+from precond_npe_misspec.pipelines.base_pnpe import ExperimentSpec, FlowConfig, default_posterior_flow_builder
 
 type Array = jax.Array
 

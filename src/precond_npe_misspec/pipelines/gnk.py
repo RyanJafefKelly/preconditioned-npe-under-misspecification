@@ -8,7 +8,14 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from precond_npe_misspec.engine.run import PosteriorConfig, PrecondConfig, RobustConfig, RunConfig, run_experiment
+from precond_npe_misspec.engine.run import (
+    NpeRsConfig,
+    PosteriorConfig,
+    PrecondConfig,
+    RobustConfig,
+    RunConfig,
+    run_experiment,
+)
 from precond_npe_misspec.examples.gnk import gnk as gnk_quantile
 from precond_npe_misspec.examples.gnk import prior_logpdf as gnk_prior_logpdf
 from precond_npe_misspec.examples.gnk import simulate as gnk_simulate
@@ -44,6 +51,7 @@ class Config:
     posterior: PosteriorConfig = PosteriorConfig()
     flow: FlowConfig = FlowConfig()
     robust: RobustConfig = RobustConfig()
+    npers: NpeRsConfig = NpeRsConfig()
     # prior ranges...
     A_min: float = 0.0
     A_max: float = 10.0
@@ -59,7 +67,6 @@ def main(cfg: Config) -> None:
     # derive s_dim from a probe
     x_probe = true_dgp(jax.random.key(0), n_obs=cfg.n_obs)
     s_dim = int(ss_robust(x_probe).shape[-1])
-
     spec = ExperimentSpec(
         name="gnk",
         theta_dim=4,
@@ -86,6 +93,28 @@ def main(cfg: Config) -> None:
         summaries_path="precond_npe_misspec.examples.gnk:summaries_for_metrics",
     )
 
+    # Optional: per‑example embedder. Default: MLP over vector x (GNK is 1D).
+    # def _gnk_embedder_builder(
+    #     key: jax.Array,
+    #     embed_dim: int,
+    #     raw_cond_shape: tuple[int, ...],
+    #     npers_cfg: NpeRsConfig,
+    # ):
+    #     in_size = int(raw_cond_shape[0])  # GNK: 1D vector of length n_obs
+    #     act = jnn.relu if str(npers_cfg.activation) == "relu" else jnn.tanh
+    #     return MLP(
+    #         in_size=in_size,
+    #         out_size=int(embed_dim),
+    #         width_size=int(npers_cfg.embed_width),
+    #         depth=int(npers_cfg.embed_depth),
+    #         activation=act,
+    #         key=key,
+    #     )
+
+    # # Attach for NPE‑RS to pick up. Other examples can supply their own builder.
+    # setattr(spec, "build_embedder", _gnk_embedder_builder)
+    # setattr(spec, "x_shape", x_shape)
+
     run_experiment(
         spec,
         RunConfig(
@@ -98,6 +127,7 @@ def main(cfg: Config) -> None:
             posterior=cfg.posterior,
             robust=cfg.robust,
             batch_size=cfg.flow.batch_size,
+            npers=cfg.npers,
         ),
         cfg.flow,
     )
