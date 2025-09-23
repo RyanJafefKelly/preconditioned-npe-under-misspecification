@@ -1,0 +1,42 @@
+#!/bin/bash -l
+#PBS -N svar_pnpe_rs_gpu
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64gb:gpu_id=H100
+#PBS -l walltime=04:00:00
+#PBS -j oe
+
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+
+# Tools/env
+export PATH="$HOME/.local/bin:$PATH"
+export UV_CACHE_DIR="${SCRATCH:-$HOME}/.cache/uv"
+export UV_PROJECT_ENVIRONMENT="$PBS_O_WORKDIR/.venv"
+which uv >/dev/null 2>&1 || { echo "uv missing"; exit 127; }
+
+# JAX runtime tweaks
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export JAX_PLATFORMS=cuda
+
+# Ensure Python 3.13 env exists (keeps your repo's requires-python >=3.13)
+if [ ! -d "$UV_PROJECT_ENVIRONMENT" ]; then
+  uv venv -p 3.13
+fi
+
+# Sync deps and force CUDA-enabled JAX wheel
+uv sync
+uv pip install --upgrade "jax[cuda12]"
+
+# Sanity: print devices (should list CUDA/H100 or A100)
+uv run python - <<'PY'
+import jax
+print("JAX", jax.__version__, "| backend:", jax.default_backend(), "| devices:", jax.devices())
+PY
+
+# Tiny smoke parameters; override via qsub -v if desired
+export MAX_EPOCHS=${MAX_EPOCHS:-10}
+export N_SIMS=${N_SIMS:-2000}
+export BATCH_SIZE=${BATCH_SIZE:-512}
+export SEED=${SEED:-0}
+
+mkdir -p logs/svar
+bash experiments/svar/run_pnpe_rs.sh 2>&1 | tee "logs/svar/pnpe_rs_gpu_rep${SEED}.log"
