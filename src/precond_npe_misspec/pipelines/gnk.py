@@ -20,7 +20,11 @@ from precond_npe_misspec.examples.gnk import gnk as gnk_quantile
 from precond_npe_misspec.examples.gnk import prior_logpdf as gnk_prior_logpdf
 from precond_npe_misspec.examples.gnk import simulate as gnk_simulate
 from precond_npe_misspec.examples.gnk import ss_robust, true_dgp
-from precond_npe_misspec.pipelines.base_pnpe import ExperimentSpec, FlowConfig, default_posterior_flow_builder
+from precond_npe_misspec.pipelines.base_pnpe import (
+    ExperimentSpec,
+    FlowConfig,
+    default_posterior_flow_builder,
+)
 
 
 def _prior_sample_factory(cfg: Config) -> Callable[[jax.Array], jnp.ndarray]:
@@ -85,7 +89,7 @@ def main(cfg: Config) -> None:
         ),
         true_dgp=lambda key, _, **kw: true_dgp(key, n_obs=cfg.n_obs),
         simulate=lambda key, th, **kw: gnk_simulate(key, th, n_obs=cfg.n_obs),
-        summaries=ss_robust,
+        summaries=ss_robust,  # TODO! FIX?
         build_posterior_flow=default_posterior_flow_builder(4, s_dim),
         theta_lo=jnp.array([cfg.A_min, cfg.B_min, cfg.g_min, cfg.k_min]),
         theta_hi=jnp.array([cfg.A_max, cfg.B_max, cfg.g_max, cfg.k_max]),

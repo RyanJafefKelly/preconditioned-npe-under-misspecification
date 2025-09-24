@@ -16,7 +16,7 @@ which uv >/dev/null 2>&1 || { echo "uv missing"; exit 127; }
 
 # Inputs from array launcher
 R=${R:-100}
-METHODS_STR=${METHODS_STR:-"npe rnpe pnpe prnpe"}
+METHODS_STR=${METHODS_STR:-"npe rnpe pnpe prnpe npe_rs pnpe_rs"}
 OBS_SEED_OFFSET=${OBS_SEED_OFFSET:-1234}
 
 # Derive (method, seed) from array index
@@ -40,7 +40,7 @@ mkdir -p "logs/gnk"
 
 # Run the selected method
 case "$METHOD" in
-  npe|rnpe|pnpe|prnpe)
+  npe|rnpe|pnpe|prnpe|npe_rs|pnpe_rs)
     bash "experiments/gnk/run_${METHOD}.sh" 2>&1 | tee "logs/gnk/${METHOD}_rep${RID}.log"
     ;;
   *)

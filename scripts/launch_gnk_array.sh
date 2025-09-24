@@ -2,10 +2,10 @@
 set -euo pipefail
 
 R=${R:-100}
-METHODS_STR=${METHODS_STR:-"npe rnpe pnpe prnpe"}
+METHODS_STR=${METHODS_STR:-"npe rnpe pnpe prnpe npe_rs pnpe_rs"}
 MEM_GB=${MEM_GB:-12}
 NCPUS=${NCPUS:-1}
-WALLTIME=${WALLTIME:-"02:00:00"}
+WALLTIME=${WALLTIME:-"03:00:00"}
 PBS_ARRAY_FLAG=${PBS_ARRAY_FLAG:--J}
 
 TOT=$(( R * $(wc -w <<<"$METHODS_STR") ))
