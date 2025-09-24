@@ -8,13 +8,29 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from data.markets import load_sp500_returns_yahoo
-from precond_npe_misspec.engine.run import PosteriorConfig, PrecondConfig, RobustConfig, RunConfig, run_experiment
+from precond_npe_misspec.data.markets import load_sp500_returns_yahoo
+from precond_npe_misspec.engine.run import (
+    NpeRsConfig,
+    PosteriorConfig,
+    PrecondConfig,
+    RobustConfig,
+    RunConfig,
+    run_experiment,
+)
 from precond_npe_misspec.examples.alpha_stable_sv import assumed_dgp as asv_assumed_dgp
-from precond_npe_misspec.examples.alpha_stable_sv import prior_sample as asv_prior_sample
-from precond_npe_misspec.examples.alpha_stable_sv import summaries_for_metrics as asv_summaries_for_metrics
+from precond_npe_misspec.examples.alpha_stable_sv import (
+    prior_sample as asv_prior_sample,
+)
+from precond_npe_misspec.examples.alpha_stable_sv import (
+    summaries_for_metrics as asv_summaries_for_metrics,
+)
 from precond_npe_misspec.examples.alpha_stable_sv import theta_bounds_3d
-from precond_npe_misspec.pipelines.base_pnpe import ExperimentSpec, FlowConfig, default_posterior_flow_builder
+from precond_npe_misspec.examples.embeddings import build as get_embedder
+from precond_npe_misspec.pipelines.base_pnpe import (
+    ExperimentSpec,
+    FlowConfig,
+    default_posterior_flow_builder,
+)
 
 
 def _uniform_logpdf_box(theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) -> jnp.ndarray:
@@ -22,6 +38,9 @@ def _uniform_logpdf_box(theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) ->
     th = jnp.asarray(theta)
     inside = jnp.all((th >= lo) & (th <= hi))
     return jnp.where(inside, 0.0, -jnp.inf)
+
+
+type Array = jax.Array
 
 
 # ---------- Public config ----------
@@ -49,6 +68,7 @@ class Config:
     posterior: PosteriorConfig = PosteriorConfig()
     robust: RobustConfig = RobustConfig()
     flow: FlowConfig = FlowConfig()
+    npers: NpeRsConfig = NpeRsConfig()
 
 
 # ---------- Spec builder ----------
@@ -72,6 +92,7 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
         true_dgp = lambda key, _theta, **kw: y_obs  # noqa: E731
 
     lo, hi = theta_bounds_3d()
+
     return ExperimentSpec(
         name="alpha_sv",
         theta_dim=theta_dim,
@@ -87,6 +108,7 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
         ),
         summaries=lambda x: asv_summaries_for_metrics(x),
         build_posterior_flow=default_posterior_flow_builder(theta_dim, s_dim),
+        build_embedder=get_embedder("asv_tcn"),
         theta_labels=(r"θ2 (AR)", r"θ3 (shock)", r"θ4 (α)"),
         summary_labels=(
             "logMAD",
