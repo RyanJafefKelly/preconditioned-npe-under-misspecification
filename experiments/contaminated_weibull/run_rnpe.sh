@@ -43,8 +43,8 @@ mkdir -p "$OUTDIR"
 : "${SLAB_SCALE:=0.25}"
 : "${MISSPECIFIED_PROB:=0.5}"
 : "${LEARN_PROB:=1}"
-: "${MCMC_WARMUP:=1000}"
-: "${MCMC_SAMPLES:=2000}"
+: "${MCMC_WARMUP:=100}"
+: "${MCMC_SAMPLES:=200}"
 : "${MCMC_THIN:=1}"
 
 LEARN_FLAG=()

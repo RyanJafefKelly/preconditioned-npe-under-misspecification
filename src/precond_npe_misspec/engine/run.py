@@ -18,21 +18,22 @@ from .posterior import fit_posterior_flow, sample_posterior
 from .preconditioning import run_preconditioning
 from .robust import denoise_s, fit_s_flow, sample_robust_posterior
 
+
 type Array = jax.Array
 
 
 @dataclass(frozen=True)
 class PrecondConfig:
-    method: Literal["none", "rejection", "smc_abc"] = "smc_abc"
+    method: Literal["none", "rejection", "smc_abc"] = "none"
     n_sims: int = 200_000
     q_precond: float = 0.2
     # SMC‑ABC
-    smc_n_particles: int = 1000
+    smc_n_particles: int = 4000
     smc_alpha: float = 0.5
     smc_epsilon0: float = 1e6
     smc_eps_min: float = 1e-3
-    smc_acc_min: float = 0.10
-    smc_max_iters: int = 5
+    smc_acc_min: float = 0.1
+    smc_max_iters: int = 30
     smc_initial_R: int = 1
     smc_c_tuning: float = 0.01
     smc_B_sim: int = 1
@@ -46,7 +47,9 @@ class PosteriorConfig:
 
 @dataclass(frozen=True)
 class RobustConfig:
-    denoise_model: Literal["laplace", "laplace_adaptive", "student_t", "cauchy", "spike_slab"] = "spike_slab"
+    denoise_model: Literal[
+        "laplace", "laplace_adaptive", "student_t", "cauchy", "spike_slab"
+    ] = "spike_slab"
     laplace_alpha: float = 0.3
     laplace_min_scale: float = 0.01
     student_t_scale: float = 0.05
@@ -65,11 +68,11 @@ class RobustConfig:
 class NpeRsConfig:
     """Config for NPE‑RS."""
 
-    embed_dim: int = 16
+    embed_dim: int = 4
     embed_width: int = 128
     embed_depth: int = 2
     activation: Literal["relu", "tanh"] = "relu"
-    mmd_weight: float = 1.0
+    mmd_weight: float = 0.1
     kernel: Literal["rbf", "imq"] = "rbf"
     mmd_subsample: int | None = 256
     bandwidth: float | Literal["median"] = "median"
@@ -114,25 +117,29 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
     obs_rng = jax.random.key(run.obs_seed)
 
     # Observed data
-    x_obs = spec.true_dgp(obs_rng, jnp.asarray(run.theta_true), **(run.sim_kwargs or {}))
+    x_obs = spec.true_dgp(
+        obs_rng, jnp.asarray(run.theta_true), **(run.sim_kwargs or {})
+    )
     s_obs = spec.summaries(x_obs)
 
     # Preconditioning → training set
     rng, k_pre = jax.random.split(rng)
-    theta_tr, S_tr = run_preconditioning(k_pre, spec, s_obs, run, flow_cfg)
+    theta_tr, S_tr, X_tr = run_preconditioning(k_pre, spec, s_obs, run, flow_cfg)
 
     # Fit q(theta | s) or q(theta | eta(s)) depending on method
     rng, k_fit = jax.random.split(rng)
     if run.posterior.method == "npe_rs":
-        rng, k_sim = jax.random.split(rng)
+        # rng, k_sim = jax.random.split(rng)
 
-        def _sim_one(k: Array, th: Array) -> Array:
-            return cast(Array, spec.simulate(k, th, **(run.sim_kwargs or {})))
+        # def _sim_one(k: Array, th: Array) -> Array:
+        #     return cast(Array, spec.simulate(k, th, **(run.sim_kwargs or {})))
 
-        keys = jax.random.split(k_sim, theta_tr.shape[0])
-        X_tr = jax.vmap(_sim_one)(keys, theta_tr)
-        q_theta_s_rs, X_mean, X_std, th_mean, th_std, losses_theta = fit_posterior_flow_npe_rs(
-            k_fit, spec, theta_tr, X_tr, x_obs, flow_cfg, run.npers
+        # keys = jax.random.split(k_sim, theta_tr.shape[0])
+        # X_tr = jax.vmap(_sim_one)(keys, theta_tr)
+        q_theta_s_rs, X_mean, X_std, th_mean, th_std, losses_theta = (
+            fit_posterior_flow_npe_rs(
+                k_fit, spec, theta_tr, X_tr, x_obs, flow_cfg, run.npers
+            )
         )
         q_theta_s = cast(Any, q_theta_s_rs)
         # For downstream compatibility, reuse S_* slots for x-whitening stats.
@@ -156,7 +163,9 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
     if run.posterior.method in ("npe", "npe_rs"):
         rng, k_post = jax.random.split(rng)
         condition_vec = x_obs_w if run.posterior.method == "npe_rs" else s_obs_w
-        theta_samps = sample_posterior(k_post, q_theta_s, condition_vec, run.posterior.n_posterior_draws)
+        theta_samps = sample_posterior(
+            k_post, q_theta_s, condition_vec, run.posterior.n_posterior_draws
+        )
 
         res = Result(
             theta_train=theta_tr,
@@ -183,13 +192,19 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             _od = _Path(run.outdir)
             _od.mkdir(parents=True, exist_ok=True)
             # Save all denoised samples (M, s_dim) and their mean context vector (s_dim,)
-            _np.savez_compressed(_od / "denoised_s_samples.npz", samples=_np.asarray(s_denoised_w))
-            _np.save(_od / "s_obs_denoised_w.npy", _np.asarray(s_denoised_w).mean(axis=0))
+            _np.savez_compressed(
+                _od / "denoised_s_samples.npz", samples=_np.asarray(s_denoised_w)
+            )
+            _np.save(
+                _od / "s_obs_denoised_w.npy", _np.asarray(s_denoised_w).mean(axis=0)
+            )
             if misspec_probs is not None:
                 _np.save(_od / "misspec_probs.npy", _np.asarray(misspec_probs))
 
         rng, k_mix = jax.random.split(rng)
-        theta_samps_robust = sample_robust_posterior(k_mix, q_theta_s, s_denoised_w, run.posterior.n_posterior_draws)
+        theta_samps_robust = sample_robust_posterior(
+            k_mix, q_theta_s, s_denoised_w, run.posterior.n_posterior_draws
+        )
         res = Result(
             theta_train=theta_tr,
             S_train=S_tr,
@@ -217,14 +232,21 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
                 "theta_dim": spec.theta_dim,
                 "s_dim": spec.s_dim,
                 "theta_labels": list(getattr(spec, "theta_labels", []) or []) or None,
-                "summary_labels": list(getattr(spec, "summary_labels", []) or []) or None,
+                "summary_labels": list(getattr(spec, "summary_labels", []) or [])
+                or None,
             },
             run_cfg=asdict(run),
             flow_cfg=asdict(flow_cfg),
             posterior_flow=res.posterior_flow,
             s_obs=res.s_obs,
-            posterior_samples=(res.posterior_samples_at_obs if run.posterior.method in ("npe", "npe_rs") else None),
-            robust_posterior_samples=(res.posterior_samples_at_obs if run.posterior.method == "rnpe" else None),
+            posterior_samples=(
+                res.posterior_samples_at_obs
+                if run.posterior.method in ("npe", "npe_rs")
+                else None
+            ),
+            robust_posterior_samples=(
+                res.posterior_samples_at_obs if run.posterior.method == "rnpe" else None
+            ),
             theta_acc=res.theta_train,
             S_acc=res.S_train,
             S_mean=res.S_mean,

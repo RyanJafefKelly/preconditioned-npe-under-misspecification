@@ -31,8 +31,8 @@ def _make_dataset(
     *,
     batch_size: int | None = None,
     sim_kwargs: dict[str, Any] | None = None,
-) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Generate (theta, S) pairs in batches from the prior."""
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Generate (theta, S, x) batches from the prior."""
     if batch_size is None:
         batch_size = max(1, min(n, 2048))
     sim_kwargs = {} if sim_kwargs is None else sim_kwargs
@@ -40,24 +40,28 @@ def _make_dataset(
     k_theta, k_sim = jax.random.split(key)
 
     @eqx.filter_jit  # compile two shapes at most (full and last partial)
-    def _simulate_batch(th_keys: Array, sm_keys: Array) -> tuple[Array, Array]:
+    def _simulate_batch(th_keys: Array, sm_keys: Array) -> tuple[Array, Array, Array]:
         thetas_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, thetas_b)  # (B, n_obs)
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+            sm_keys, thetas_b
+        )  # (B, n_obs)
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
-        return thetas_b, S_b
+        return thetas_b, S_b, xs_b
 
-    th_parts, S_parts = [], []
+    th_parts, S_parts, x_parts = [], [], []
     for start in range(0, n, batch_size):
         end = min(start + batch_size, n)
         idx = jnp.arange(start, end, dtype=jnp.uint32)
         th_keys = jax.vmap(lambda i: jax.random.fold_in(k_theta, i))(idx)
         sm_keys = jax.vmap(lambda i: jax.random.fold_in(k_sim, i))(idx)
-        th_b, S_b = _simulate_batch(th_keys, sm_keys)
+        th_b, S_b, x_b = _simulate_batch(th_keys, sm_keys)
         th_parts.append(th_b)
         S_parts.append(S_b)
+        x_parts.append(x_b)
 
     thetas = jnp.concatenate(th_parts, axis=0)
     S = jnp.concatenate(S_parts, axis=0)
+    xs = jnp.concatenate(x_parts, axis=0)
 
     mask_theta = jnp.all(jnp.isfinite(thetas), axis=1)
     mask_S = jnp.all(jnp.isfinite(S), axis=1)
@@ -65,8 +69,9 @@ def _make_dataset(
 
     thetas = thetas[mask]
     S = S[mask]
+    xs = xs[mask]
 
-    return thetas, S
+    return thetas, S, xs
 
 
 def _abc_rejection_with_sim(
@@ -79,14 +84,14 @@ def _abc_rejection_with_sim(
     dist_fn: DistanceFn,
     batch_size: int | None,
     sim_kwargs: dict[str, Any] | None,
-) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Rejection ABC with on‑the‑fly simulation. Returns accepted (θ,S)."""
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Rejection ABC with on‑the‑fly simulation. Returns accepted (θ, S, x)."""
     if batch_size is None:
         batch_size = max(1, min(n_sims, 2048))
     sim_kwargs = {} if sim_kwargs is None else sim_kwargs
 
     k_th_base, k_sm_base = jax.random.split(key)
-    th_chunks, S_chunks, d_chunks = [], [], []
+    th_chunks, S_chunks, x_chunks, d_chunks = [], [], [], []
 
     for start in range(0, n_sims, batch_size):
         end = min(start + batch_size, n_sims)
@@ -96,33 +101,42 @@ def _abc_rejection_with_sim(
         th_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
 
         sm_keys = jax.vmap(lambda i: jax.random.fold_in(k_sm_base, i))(idx)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, th_b)
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+            sm_keys, th_b
+        )
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
 
         d_b = _to_vec(dist_fn(S_b, s_obs))  # (B,)
         th_chunks.append(th_b)
         S_chunks.append(S_b)
+        x_chunks.append(xs_b)
         d_chunks.append(d_b)
 
     thetas_all = jnp.concatenate(th_chunks, axis=0)
     S_all = jnp.concatenate(S_chunks, axis=0)
+    x_all = jnp.concatenate(x_chunks, axis=0)
     d_all = jnp.concatenate(d_chunks, axis=0)
 
     finite = jnp.isfinite(d_all)
     thetas_all = thetas_all[finite]
     S_all = S_all[finite]
+    x_all = x_all[finite]
     d_all = d_all[finite]
     n_tot = int(d_all.shape[0])
 
     # Keep exactly n_keep: q in (0,1] => fraction; q>=1 => absolute count.
-    n_keep = max(1, min(n_tot, int(jnp.ceil(q * n_tot)))) if 0 < q <= 1.0 else max(1, min(n_tot, int(q)))
+    n_keep = (
+        max(1, min(n_tot, int(jnp.ceil(q * n_tot))))
+        if 0 < q <= 1.0
+        else max(1, min(n_tot, int(q)))
+    )
 
     idx = jnp.argpartition(d_all, n_keep - 1)[:n_keep]
     idx = idx[jnp.argsort(d_all[idx])]
     eps_star = float(d_all[idx][-1])
 
     print(f"Preconditioning: rejection | kept={n_keep}/{n_tot} | eps*={eps_star:0.6g}")
-    return thetas_all[idx], S_all[idx]
+    return thetas_all[idx], S_all[idx], x_all[idx]
 
 
 def run_preconditioning(
@@ -131,14 +145,16 @@ def run_preconditioning(
     s_obs: jnp.ndarray,
     run: Any,
     flow_cfg: Any,  # unused here, kept for a stable call signature
-) -> tuple[jnp.ndarray, jnp.ndarray]:
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
-    Return a training set (theta_train, S_train) according to:
+    Return training triples (theta_train, S_train, X_train) according to:
       - method="none"       → prior draws
       - method="rejection"  → rejection ABC
       - method="smc_abc"    → SMC‑ABC
     """
-    sim_kwargs = {} if getattr(run, "sim_kwargs", None) is None else dict(run.sim_kwargs)
+    sim_kwargs = (
+        {} if getattr(run, "sim_kwargs", None) is None else dict(run.sim_kwargs)
+    )
     batch_size = int(getattr(run, "batch_size", 512))
     method = run.precond.method
 
@@ -149,7 +165,7 @@ def run_preconditioning(
         "smc_abc",
     }:
         key, k_pilot = jax.random.split(key)
-        _, S_pilot = _make_dataset(
+        _, S_pilot, _ = _make_dataset(
             spec,
             k_pilot,
             run.precond.n_sims,
@@ -159,7 +175,7 @@ def run_preconditioning(
 
     if method == "none":
         key, k_data = jax.random.split(key)
-        theta_train, S_train = _make_dataset(
+        theta_train, S_train, x_train = _make_dataset(
             spec,
             k_data,
             run.precond.n_sims,
@@ -169,7 +185,7 @@ def run_preconditioning(
         theta_train = theta_train.astype(jnp.float32)
         S_train = S_train.astype(jnp.float32)
         print(f"Preconditioning: none    | training pairs: {int(theta_train.shape[0])}")
-        return theta_train, S_train
+        return theta_train, S_train, x_train
 
     if method == "rejection":
         # Distance selection
@@ -179,7 +195,7 @@ def run_preconditioning(
             assert S_pilot is not None
             dist_fn = spec.make_distance(S_pilot)
         key, k_abc = jax.random.split(key)
-        th, S = _abc_rejection_with_sim(
+        th, S, X = _abc_rejection_with_sim(
             spec,
             k_abc,
             s_obs,
@@ -189,11 +205,15 @@ def run_preconditioning(
             batch_size=batch_size,
             sim_kwargs=sim_kwargs,
         )
-        return th.astype(jnp.float32), S.astype(jnp.float32)
+        return (
+            th.astype(jnp.float32),
+            S.astype(jnp.float32),
+            X,
+        )
 
     if method == "smc_abc":
         key, k_smc = jax.random.split(key)
-        theta_particles, S_particles = run_smc_abc(
+        theta_particles, S_particles, x_particles = run_smc_abc(
             key=k_smc,
             n_particles=run.precond.smc_n_particles,
             epsilon0=run.precond.smc_epsilon0,
@@ -212,6 +232,6 @@ def run_preconditioning(
         theta_particles = theta_particles.astype(jnp.float32)
         S_particles = S_particles.astype(jnp.float32)
         print(f"Preconditioning: smc_abc | particles: {int(theta_particles.shape[0])}")
-        return theta_particles, S_particles
+        return theta_particles, S_particles, x_particles
 
     raise ValueError(f"Unknown preconditioning method: {method!r}")

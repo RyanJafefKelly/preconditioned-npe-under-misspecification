@@ -43,10 +43,14 @@ def build(name: str) -> EmbedBuilder:
 
 
 def _ensure_bkt(x: Array, raw_shape: tuple[int, ...]) -> Array:
-    """Accept (..., T, K) with any leading batch dims (incl. singleton). Return (B, K, T)."""
-    assert len(raw_shape) >= 2, "raw_cond_shape must end with (T, K) for SVAR/time-series."
-    T, K = int(raw_shape[-2]), int(raw_shape[-1])
-    B = int(x.size // (T * K))  # collapse all leading batch dims (incl. extra singleton)
+    """Accept (..., T) or (..., T, K) with any leading batch dims. Return (B, K, T)."""
+    if len(raw_shape) == 1:
+        T, K = int(raw_shape[0]), 1
+    else:
+        T, K = int(raw_shape[-2]), int(raw_shape[-1])
+    B = int(
+        x.size // (T * K)
+    )  # collapse all leading batch dims (incl. extra singleton)
     x_btk = jnp.reshape(x, (B, T, K))  # (B, T, K)
     return jnp.swapaxes(x_btk, -1, -2)  # (B, K, T)
 
@@ -65,14 +69,18 @@ def _causal_pad(x_bkt: Array, kernel: int, dilation: int) -> Array:
 
 
 @register("mlp_flat")
-def mlp_flat(key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any) -> _EqxModule:
+def mlp_flat(
+    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
+) -> _EqxModule:
     in_size = int(jnp.prod(jnp.array(raw_cond_shape)))
     mlp = MLP(
         in_size=in_size,
         out_size=int(embed_dim),
         width_size=int(getattr(cfg, "embed_width", 128)),
         depth=int(getattr(cfg, "embed_depth", 2)),
-        activation=(jnn.relu if getattr(cfg, "activation", "relu") == "relu" else jnn.tanh),
+        activation=(
+            jnn.relu if getattr(cfg, "activation", "relu") == "relu" else jnn.tanh
+        ),
         key=key,
     )
 
@@ -108,7 +116,11 @@ class _TCNBlock(_EqxModule):
         self.k, self.d = int(k), int(d)
         self.dil = Conv1d(in_ch, ch, kernel_size=k, dilation=d, use_bias=True, key=k1)
         self.pw = Conv1d(ch, ch, kernel_size=1, use_bias=True, key=k2)
-        self.proj = None if in_ch == ch else Conv1d(in_ch, ch, kernel_size=1, use_bias=True, key=k3)
+        self.proj = (
+            None
+            if in_ch == ch
+            else Conv1d(in_ch, ch, kernel_size=1, use_bias=True, key=k3)
+        )
 
     def __call__(self, x_bkt: Array) -> Array:
         # x_bkt: (B, C_in, T)
@@ -170,7 +182,9 @@ class _SVAR_TCN(_EqxModule):
 
 
 @register("tcn_small")
-def tcn_small(key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any) -> _EqxModule:
+def tcn_small(
+    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
+) -> _EqxModule:
     ch = int(getattr(cfg, "tcn_channels", 32))
     ksize = int(getattr(cfg, "tcn_kernel", 5))
     dilations = tuple(getattr(cfg, "tcn_dilations", (1, 2, 4)))
@@ -186,3 +200,89 @@ def tcn_small(key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: 
         head_width=head_width,
         head_depth=head_depth,
     )
+
+
+@register("asv_tcn")
+def asv_tcn(
+    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
+) -> _EqxModule:
+    """Default embedder for alpha‑SV raw returns."""
+    ch = int(getattr(cfg, "tcn_channels", 32))
+    ksize = int(getattr(cfg, "tcn_kernel", 5))
+    # Slightly deeper dilation stack for long‑memory in |z|
+    dilations = tuple(getattr(cfg, "tcn_dilations", (1, 2, 4, 8)))
+    head_width = int(getattr(cfg, "embed_width", 128))
+    head_depth = int(getattr(cfg, "embed_depth", 1))
+    return _SVAR_TCN(  # NOTE: turns out the network for SVAR pretty good for ASV...guess they both similar time-series
+        key=key,
+        raw_shape=tuple(raw_cond_shape),
+        embed_dim=int(embed_dim),
+        ch=ch,
+        ksize=ksize,
+        dilations=dilations,
+        head_width=head_width,
+        head_depth=head_depth,
+    )
+
+
+@register("iid_deepset")
+def iid_deepset(
+    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
+) -> _EqxModule:
+    """
+    DeepSets for iid 1D samples y[0:T):  φ: R->R^H, mean-pool over T,  ρ: R^H->R^{embed_dim}.
+    Accepts x with shape (T,) or batched (..., T). Returns (embed_dim,) or batched (..., embed_dim).
+    """
+    # T = int(raw_cond_shape[-1])
+    width = int(getattr(cfg, "embed_width", 128))
+    depth = max(1, int(getattr(cfg, "embed_depth", 2)))
+    k1, k2 = jax.random.split(key, 2)
+
+    phi = MLP(
+        in_size=1,
+        out_size=width,
+        width_size=width,
+        depth=depth,
+        activation=jnn.silu,
+        key=k1,
+    )
+    rho = MLP(
+        in_size=width,
+        out_size=int(embed_dim),
+        width_size=width,
+        depth=depth,
+        activation=jnn.silu,
+        key=k2,
+    )
+
+    class _DeepSet1D(_EqxModule):
+        phi: MLP
+        rho: MLP
+        raw_shape: tuple[int, ...]
+        width: int
+
+        def __init__(self, phi: MLP, rho: MLP, raw_shape: tuple[int, ...], width: int):
+            self.phi = phi
+            self.rho = rho
+            self.raw_shape = tuple(raw_cond_shape)
+            self.width = int(width)
+
+        def __call__(self, x: Array) -> Array:
+            x = jnp.asarray(x, dtype=jnp.float32)
+            T = int(self.raw_shape[-1])
+            B = int(x.size // T)
+            x_bt = jnp.reshape(x, (B, T))
+
+            # φ over elements
+            xt = jnp.reshape(x_bt, (B * T, 1))  # (B*T, 1)
+            Et = eqx.filter_vmap(self.phi)(xt)  # (B*T, H)
+            E = jnp.reshape(Et, (B, T, self.width))  # (B, T, H)
+
+            # mean pool over T
+            Z = E.mean(axis=1)  # (B, H)
+
+            # ρ head
+            Zemb = eqx.filter_vmap(self.rho)(Z)  # (B, d_emb)
+            return Zemb[0] if B == 1 else Zemb
+
+    return _DeepSet1D(phi, rho, raw_cond_shape, width)

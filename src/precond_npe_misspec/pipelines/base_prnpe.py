@@ -16,7 +16,12 @@ from flowjax.distributions import Transformed as _Transformed
 from flowjax.flows import coupling_flow
 from flowjax.train import fit_to_data
 
-from precond_npe_misspec.pipelines.base_pnpe import ExperimentSpec, FlowConfig, RunConfig, preconditioning_step
+from precond_npe_misspec.pipelines.base_pnpe import (
+    ExperimentSpec,
+    FlowConfig,
+    RunConfig,
+    preconditioning_step,
+)
 from precond_npe_misspec.robust.denoise import run_denoising_mcmc
 from precond_npe_misspec.utils.artifacts import save_artifacts
 
@@ -25,13 +30,17 @@ DistanceFn = Callable[[Array, Array], Array]
 DistanceFactory = Callable[[Array], DistanceFn]
 
 
-def _to_unconstrained(theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) -> jnp.ndarray:
+def _to_unconstrained(
+    theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray
+) -> jnp.ndarray:
     p = (theta - lo) / (hi - lo)
     p = jnp.clip(p, 1e-6, 1.0 - 1e-6)
     return jnp.log(p) - jnp.log1p(-p)
 
 
-def _from_unconstrained(u: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) -> jnp.ndarray:
+def _from_unconstrained(
+    u: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray
+) -> jnp.ndarray:
     return lo + (hi - lo) * jnn.sigmoid(u)
 
 
@@ -55,7 +64,9 @@ def default_summaries_flow_builder(
         return coupling_flow(
             key=key,
             base_dist=Normal(jnp.zeros(s_dim)),  # base dist is summaries
-            transformer=bij.RationalQuadraticSpline(knots=cfg.knots, interval=cfg.interval),
+            transformer=bij.RationalQuadraticSpline(
+                knots=cfg.knots, interval=cfg.interval
+            ),
             cond_dim=None,  # unconditional q(s) ... used in denoising step
             flow_layers=cfg.flow_layers,
             nn_width=cfg.nn_width,
@@ -98,7 +109,9 @@ def _make_dataset_summaries(
     th_parts, S_parts = [], []
     for start in range(0, n, batch_size):
         end = min(start + batch_size, n)
-        th_b, S_b = simulate_summaries(jnp.arange(start, end, dtype=jnp.uint32), end - start)
+        th_b, S_b = simulate_summaries(
+            jnp.arange(start, end, dtype=jnp.uint32), end - start
+        )
         th_parts.append(th_b)
         S_parts.append(S_b)
     return jnp.concatenate(th_parts, 0), jnp.concatenate(S_parts, 0)
@@ -119,7 +132,9 @@ def _fit_posterior_flow(
     flow0 = spec.build_posterior_flow(k_build, flow_cfg)
 
     # If bounds are provided, train flow in unconstrained space u
-    if (getattr(spec, "theta_lo", None) is not None) and (getattr(spec, "theta_hi", None) is not None):
+    if (getattr(spec, "theta_lo", None) is not None) and (
+        getattr(spec, "theta_hi", None) is not None
+    ):
         lo = jnp.asarray(spec.theta_lo)
         hi = jnp.asarray(spec.theta_hi)
 
@@ -226,10 +241,12 @@ def run_experiment_prnpe(
     spec: ExperimentSpec,
     run: RunConfig,
     flow_cfg: FlowConfig,
-    denoise_model: Literal["laplace", "laplace_adaptive", "student_t", "cauchy", "spike_slab"] = "spike_slab",
+    denoise_model: Literal[
+        "laplace", "laplace_adaptive", "student_t", "cauchy", "spike_slab"
+    ] = "spike_slab",
     denoise_kwargs: dict[str, Any] | None = None,
-    mcmc_num_warmup: int = 1000,
-    mcmc_num_samples: int = 2000,
+    mcmc_num_warmup: int = 100,
+    mcmc_num_samples: int = 200,
     mcmc_thinning: int = 1,
 ) -> RobustRunResult:
     rng = jax.random.key(run.seed)
@@ -275,7 +292,9 @@ def run_experiment_prnpe(
 
     # Robust posterior conditioned on denoised s
     rng, k_mix = jax.random.split(rng)
-    th_samps_robust = _sample_robust_posterior(k_mix, posterior_flow, s_denoised_w, run.n_posterior_draws)
+    th_samps_robust = _sample_robust_posterior(
+        k_mix, posterior_flow, s_denoised_w, run.n_posterior_draws
+    )
 
     result = RobustRunResult(
         theta_acc_precond=theta_acc,

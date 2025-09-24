@@ -10,7 +10,9 @@ type Array = jax.Array
 type PRNGKey = Array
 
 EPS = 1e-8
-LOG_EXP_SKEW_CONST = jnp.asarray(-1.1395470994046486, dtype=jnp.float32)  # skew(log Exp(1))
+LOG_EXP_SKEW_CONST = jnp.asarray(
+    -1.1395470994046486, dtype=jnp.float32
+)  # skew(log Exp(1))
 
 
 # -----------------------------
@@ -21,7 +23,7 @@ def _weibull_sample(key: PRNGKey, k: ArrayLike, lam: ArrayLike, n: int) -> Array
     k = jnp.asarray(k)
     lam = jnp.asarray(lam)
     e = random.exponential(key, shape=(n,) + k.shape)
-    return lam * e ** (1.0 / k)
+    return jnp.log(lam * e ** (1.0 / k))
 
 
 def simulate(key: PRNGKey, theta: jnp.ndarray, *, n_obs: int) -> jnp.ndarray:
@@ -32,27 +34,17 @@ def simulate(key: PRNGKey, theta: jnp.ndarray, *, n_obs: int) -> jnp.ndarray:
     return _weibull_sample(key, k, lam, n_obs)
 
 
-def true_dgp(
-    key: PRNGKey,
-    theta: Array,
-    *,
-    n_obs: int,
-    eps: float = 0.1,
-    # eta: float = 1.0,
-    # alpha=None,
-) -> Array:
-    # simulate assumed X = log Y
+def true_dgp(key, theta, *, n_obs: int, eps: float = 0.1) -> Array:
     k = jnp.asarray(theta)[..., 0]
     lam = jnp.asarray(theta)[..., 1]
     k1, k2, k3 = random.split(key, 3)
     e = random.exponential(k1, (n_obs,) + k.shape)
-    x0 = jnp.log(lam) + (1.0 / k) * jnp.log(e + EPS)
-    # contamination: add T >= 0 to a small fraction
-    T = random.exponential(k2, (n_obs,) + k.shape)  # * (1.0 / eta)
-    misspec_scale = 5.0  # NOTE: could show affect of sliding this up
+    x0 = jnp.log(lam) + (1.0 / k) * jnp.log(e + EPS)  # log Y
+    T = random.exponential(k2, (n_obs,) + k.shape)
+    misspec_scale = 5.0
     u = random.uniform(k3, (n_obs,) + k.shape)
-    x = jnp.where(u < eps, x0 + misspec_scale * T, x0)
-    return jnp.exp(x)
+    x = jnp.where(u < eps, x0 + misspec_scale * T, x0)  # contaminate on logs
+    return x
 
 
 # -----------------------------
@@ -64,17 +56,12 @@ def _log_skew(x: Array) -> Array:
     return jnp.mean(xm**3) / (s**3)
 
 
-def ss_log(y: ArrayLike) -> Array:
-    """Robust-ish 3D summaries on log-scale: [median, IQR, skew]."""
-    idr = jnp.quantile(y, 0.9) - jnp.quantile(y, 0.1)
-    ior = jnp.quantile(y, 0.8) - jnp.quantile(y, 0.2)
-    x = jnp.log(jnp.asarray(y) + EPS)
-    # x_mean = jnp.mean(x)
-    # med = jnp.median(x)
-    # x_var = jnp.var(x)
-    # iqr = jnp.quantile(x, 0.75) - jnp.quantile(x, 0.25)
+def ss_log(x: Array) -> Array:
+    med = jnp.median(x)
+    idr = jnp.quantile(x, 0.9) - jnp.quantile(x, 0.1)
+    ior = jnp.quantile(x, 0.8) - jnp.quantile(x, 0.2)
     skew = _log_skew(x)
-    return jnp.asarray([idr, ior, skew], dtype=jnp.float32)
+    return jnp.asarray([med, jnp.exp(idr), jnp.exp(ior), skew], dtype=jnp.float32)
 
 
 def summaries_for_metrics(y: jnp.ndarray) -> jnp.ndarray:
@@ -85,9 +72,9 @@ def summaries_for_metrics(y: jnp.ndarray) -> jnp.ndarray:
 def prior_sample(
     key: PRNGKey,
     logk_mu: float = -0.4,
-    logk_sigma: float = 0.7,
+    logk_sigma: float = 1.2,
     loglam_mu: float = 0.7,
-    loglam_sigma: float = 0.7,
+    loglam_sigma: float = 1.2,
 ) -> jnp.ndarray:
     """Sample θ=(k,λ) with log‑normal marginals. Returns float64 for SMC stability."""
     k1, k2 = random.split(key)
@@ -95,7 +82,7 @@ def prior_sample(
     loglam = loglam_mu + loglam_sigma * random.normal(k2)
     k = jnp.exp(logk)
     lam = jnp.exp(loglam)
-    return jnp.asarray([k, lam], dtype=jnp.float64)
+    return jnp.asarray([k, lam])
 
 
 # # Optional: distance factory that ignores the incompatible skew component
@@ -134,7 +121,9 @@ if __name__ == "__main__":
 
     # crude ABC pilot to show acceptance ignoring skew
     M = 2000
-    th_keys = jax.vmap(lambda i: random.fold_in(key, i))(jnp.arange(M, dtype=jnp.uint32))
+    th_keys = jax.vmap(lambda i: random.fold_in(key, i))(
+        jnp.arange(M, dtype=jnp.uint32)
+    )
     thetas = jax.vmap(prior_sample)(th_keys)
     x_sim = jax.vmap(lambda kk, th: simulate(kk, th, n_obs=n))(th_keys, thetas)
     S_sim = jax.vmap(ss_log)(x_sim)
