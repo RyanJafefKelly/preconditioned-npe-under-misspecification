@@ -4,6 +4,11 @@ set -euo pipefail
 export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 DATE=$(date +"%Y%m%d-%H%M%S")
 
+# Ensure local packages (e.g. data/) stay on the import path
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+
 : "${SEED:=0}"
 : "${T:=1000}"
 : "${THETA1:=0.0}"

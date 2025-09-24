@@ -8,6 +8,9 @@
 set -euo pipefail
 cd "$PBS_O_WORKDIR"
 
+# Expose repo-local packages (e.g. data/)
+export PYTHONPATH="$PBS_O_WORKDIR:${PYTHONPATH:-}"
+
 : "${MMD_WEIGHT:=1.0}"
 MMD_TAG_RAW=$(printf '%s' "$MMD_WEIGHT" | tr '[:upper:]' '[:lower:]')
 MMD_TAG=$(printf '%s' "$MMD_TAG_RAW" | tr -c '0-9a-z' '_')
