@@ -15,11 +15,8 @@ from flowjax.distributions import Normal, Transformed
 from flowjax.flows import coupling_flow
 from flowjax.train import fit_to_data
 
-from precond_npe_misspec.utils.mmd import (
-    median_heuristic_bandwidth,
-    mmd2_vstat,
-    rbf_kernel_matrix,
-)
+from precond_npe_misspec.utils.mmd import (median_heuristic_bandwidth,
+                                           mmd2_vstat, rbf_kernel_matrix)
 
 type Array = jax.Array
 EPS = 1e-8
@@ -113,9 +110,7 @@ def _build_posterior_with_embed(
 
     # Base flow with 'cond_dim=embed_dim'
     base = Normal(jnp.zeros(theta_dim))
-    transformer = bij.RationalQuadraticSpline(
-        knots=flow_cfg.knots, interval=flow_cfg.interval
-    )
+    transformer = bij.RationalQuadraticSpline(knots=flow_cfg.knots, interval=flow_cfg.interval)
     flow = coupling_flow(
         key=k_flow,
         base_dist=base,
@@ -132,9 +127,7 @@ def _build_posterior_with_embed(
         try:
             embedder = cast(
                 Embedder,
-                custom_builder(
-                    k_emb, int(npers_cfg.embed_dim), raw_cond_shape, npers_cfg
-                ),
+                custom_builder(k_emb, int(npers_cfg.embed_dim), raw_cond_shape, npers_cfg),
             )
         except TypeError:
             # Fallback if builder does not accept npers_cfg
@@ -144,11 +137,7 @@ def _build_posterior_with_embed(
             )
     else:
         # Default: simple MLP expecting 1D condition. Works for vector observations.
-        in_size = (
-            int(raw_cond_shape[0])
-            if len(raw_cond_shape) == 1
-            else int(jnp.prod(jnp.array(raw_cond_shape)))
-        )
+        in_size = int(raw_cond_shape[0]) if len(raw_cond_shape) == 1 else int(jnp.prod(jnp.array(raw_cond_shape)))
 
         def _maybe_flatten(z: Array) -> Array:
             return z if len(z.shape) == 1 else jnp.reshape(z, (in_size,))
@@ -177,9 +166,7 @@ def _build_posterior_with_embed(
         embedder = cast(Embedder, FlattenThenMLP(mlp, in_size))
 
     # Wrap bijection to accept raw condition shape (s_dim,) and embed internally.
-    wrapped_bij = EmbedCondition(
-        flow.bijection, embedding_net=embedder, raw_cond_shape=tuple(raw_cond_shape)
-    )
+    wrapped_bij = EmbedCondition(flow.bijection, embedding_net=embedder, raw_cond_shape=tuple(raw_cond_shape))
     # FlowJAX exposes Transformed as an eqx dataclass; cast keeps mypy happy.
     transformed_ctor = cast(Any, Transformed)
     return cast(Transformed, transformed_ctor(base_dist=base, bijection=wrapped_bij))
@@ -201,9 +188,7 @@ def _make_npers_loss(
         x_b_w: Array,
         key: Array,
     ) -> Array:
-        dist: Transformed = eqx.combine(
-            params, static
-        )  # flow with EmbedCondition bijection
+        dist: Transformed = eqx.combine(params, static)  # flow with EmbedCondition bijection
         # NLL term3
         nll = -dist.log_prob(theta_b, x_b_w).mean()
 
@@ -254,9 +239,7 @@ def fit_posterior_flow_npe_rs(
 ) -> tuple[eqx.Module, Array, Array, Array, Array, LossHistory]:
     """Train q(θ | η(s)) with NLL + λ·MMD²(η(x), η(x_obs))."""
     theta_dim = int(spec.theta_dim)
-    has_bounds = (getattr(spec, "theta_lo", None) is not None) and (
-        getattr(spec, "theta_hi", None) is not None
-    )
+    has_bounds = (getattr(spec, "theta_lo", None) is not None) and (getattr(spec, "theta_hi", None) is not None)
     theta_train_proc = theta_train
     bounds_info: tuple[Array, Array, Array, Array] | None = None
     if has_bounds:

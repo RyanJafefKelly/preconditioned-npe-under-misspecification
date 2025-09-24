@@ -61,8 +61,8 @@ def run_smc_abc(
     s_obs: Array,
     sim_kwargs: dict[str, Any] | None,
     S_pilot_for_distance: Array | None,
-) -> tuple[Array, Array]:
-    """Return (theta_particles, S_particles) at final ε."""
+) -> tuple[Array, Array, Array]:
+    """Return (theta_particles, S_particles, x_particles) at final ε."""
     sim_kwargs = {} if sim_kwargs is None else dict(sim_kwargs)
     key, k_init, k_draw = jax.random.split(key, 3)
 
@@ -87,7 +87,9 @@ def run_smc_abc(
             return _one_sim(k, th)  # (d,)
 
     # distance
-    rho = _build_distance(s_obs=s_obs, S_pilot=S_pilot_for_distance, make_distance=spec.make_distance)
+    rho = _build_distance(
+        s_obs=s_obs, S_pilot=S_pilot_for_distance, make_distance=spec.make_distance
+    )
 
     # prior log pdf
     if getattr(spec, "prior_logpdf", None) is not None:
@@ -136,10 +138,15 @@ def run_smc_abc(
         key_loop, k = jax.random.split(key_loop)
         state, info = _core(k, state, int(state.R))
         t += 1
+        print("state.epsilon: ", state.epsilon)
         if default_stopping(state, info, eps_min=eps_min, acc_min=acc_min):
             break
 
-    # one pass to get S for training
+    # one pass to get simulated data and summaries for training
     kS = jax.random.split(key_loop, n_particles)
-    S_acc = jax.vmap(lambda kk, th: spec.summaries(spec.simulate(kk, th, **sim_kwargs)))(kS, state.particles)
-    return state.particles, S_acc
+    def _simulate_and_summarize(kk: Array, th: Array) -> tuple[Array, Array]:
+        x = spec.simulate(kk, th, **sim_kwargs)
+        return x, spec.summaries(x)
+
+    x_acc, S_acc = jax.vmap(_simulate_and_summarize)(kS, state.particles)
+    return state.particles, S_acc, x_acc
