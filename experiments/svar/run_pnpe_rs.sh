@@ -27,7 +27,7 @@ mkdir -p "$OUTDIR"
 
 # Flow hyperparameters
 : "${FLOW_LAYERS:=8}"; : "${NN_WIDTH:=128}"; : "${KNOTS:=10}"; : "${INTERVAL:=8.0}"
-: "${LEARNING_RATE:=5e-4}"; : "${MAX_EPOCHS:=500}"; : "${MAX_PATIENCE:=10}"; : "${BATCH_SIZE:=512}"
+: "${LEARNING_RATE:=5e-4}"; : "${MAX_EPOCHS:=20`}"; : "${MAX_PATIENCE:=10}"; : "${BATCH_SIZE:=512}"
 
 # NPE‑RS (embedding + MMD)
 : "${EMBED_DIM:=8}"

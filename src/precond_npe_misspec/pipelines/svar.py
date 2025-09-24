@@ -63,6 +63,15 @@ def _make_spec(cfg: Config) -> ExperimentSpec:
     m = int(pairs.shape[0])
     theta_dim = 2 * m + 1
 
+    summaries_fn = svar_summaries
+
+    # if cfg.posterior.method == "npe_rs":
+    #     # for NPE-RS use identity for preconditioning
+    #     def svar_flatten(x: Array, pairs: Array) -> Array:
+    #         return jnp.ravel(x)
+
+    #     summaries_fn = svar_flatten  # type: ignore
+
     # probe summaries to get s_dim
     x_probe = svar_assumed_dgp(
         jax.random.key(0),
@@ -71,7 +80,7 @@ def _make_spec(cfg: Config) -> ExperimentSpec:
         T=cfg.T,
         pairs=pairs,
     )
-    s_dim = int(svar_summaries(x_probe, pairs=pairs).shape[-1])
+    s_dim = int(summaries_fn(x_probe, pairs=pairs).shape[-1])
 
     # choose observation DGP
     if cfg.obs_model == "assumed":
@@ -98,8 +107,10 @@ def _make_spec(cfg: Config) -> ExperimentSpec:
         prior_sample=lambda key: svar_prior_sample(key, pairs=pairs),
         prior_logpdf=lambda th: svar_prior_logpdf(th, pairs=pairs),
         true_dgp=true_dgp,
-        simulate=lambda key, theta, **kw: svar_assumed_dgp(key, theta, k=cfg.k, T=cfg.T, pairs=pairs),
-        summaries=lambda x: svar_summaries(x, pairs=pairs),
+        simulate=lambda key, theta, **kw: svar_assumed_dgp(
+            key, theta, k=cfg.k, T=cfg.T, pairs=pairs
+        ),
+        summaries=lambda x: summaries_fn(x, pairs=pairs),
         build_posterior_flow=default_posterior_flow_builder(theta_dim, s_dim),
         theta_lo=jnp.array([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 0]),
         theta_hi=jnp.ones(7),
