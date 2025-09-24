@@ -1,0 +1,33 @@
+#!/bin/bash -l
+#PBS -N alpha_sv_npe_rs
+#PBS -l walltime=44:00:00
+#PBS -l mem=24GB
+#PBS -l ncpus=1
+#PBS -j oe
+
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+
+: "${MMD_WEIGHT:=1.0}"
+MMD_TAG_RAW=$(printf '%s' "$MMD_WEIGHT" | tr '[:upper:]' '[:lower:]')
+MMD_TAG=$(printf '%s' "$MMD_TAG_RAW" | tr -c '0-9a-z' '_')
+JOB_TAG=$(printf '%s' "${PBS_JOBID:-manual_$(date +%s)}" | tr -c '0-9a-zA-Z' '_')
+LOG_DIR="logs/alpha_sv"
+LOG_FILE="${LOG_DIR}/npe_rs_mmd${MMD_TAG}_${JOB_TAG}.log"
+
+mkdir -p "$LOG_DIR"
+echo "[pbs] method=npe_rs mmd_weight=$MMD_WEIGHT job=$JOB_TAG" | tee "$LOG_FILE"
+
+# Ensure uv tooling is reachable and we cache deps on fast storage
+export PATH="$HOME/.local/bin:$PATH"
+export UV_CACHE_DIR="${SCRATCH:-$HOME}/.cache/uv"
+export UV_PROJECT_ENVIRONMENT="$PBS_O_WORKDIR/.venv"
+which uv >/dev/null 2>&1 || { echo "uv missing" >&2; exit 127; }
+
+# Create the Python 3.13 environment once, then sync dependencies
+if [ ! -d "$UV_PROJECT_ENVIRONMENT" ]; then
+  uv venv -p 3.13
+fi
+uv sync
+
+bash experiments/alpha_sv/run_npe_rs.sh 2>&1 | tee -a "$LOG_FILE"
