@@ -15,6 +15,7 @@ dependencies = [
     "tyro>=0.9.28",
     "yfinance>=0.2.65",
     "blackjax",
+    "tumourmodel"
 ]
 
 [build-system]
@@ -58,3 +59,4 @@ ignore_missing_imports = true
 [tool.uv.sources]
 # HTTPS:
 blackjax = { git = "https://github.com/RyanJafefKelly/blackjax", branch = "smc_abc" }
+tumourmodel = { git = "https://github.com/RyanJafefKelly/tumourmodel-py.git" }
