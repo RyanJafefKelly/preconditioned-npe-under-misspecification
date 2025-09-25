@@ -9,21 +9,13 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from precond_npe_misspec.engine.run import (
-    NpeRsConfig,
-    PosteriorConfig,
-    PrecondConfig,
-    RobustConfig,
-    RunConfig,
-    run_experiment,
-)
-from precond_npe_misspec.examples.embeddings import build as get_embedder
+from precond_npe_misspec.engine.run import (NpeRsConfig, PosteriorConfig,
+                                            PrecondConfig, RobustConfig,
+                                            RunConfig, run_experiment)
 from precond_npe_misspec.examples import contaminated_weibull as cw
+from precond_npe_misspec.examples.embeddings import build as get_embedder
 from precond_npe_misspec.pipelines.base_pnpe import (
-    ExperimentSpec,
-    FlowConfig,
-    default_posterior_flow_builder,
-)
+    ExperimentSpec, FlowConfig, default_posterior_flow_builder)
 
 type Array = jax.Array
 
@@ -73,9 +65,7 @@ def _prior_logpdf_lognorm(
     if th.shape[-1] != 2:
         raise ValueError("theta must have last dimension 2: (k, lambda).")
     k, lam = th[..., 0], th[..., 1]
-    return _lognorm_logpdf(k, logk_mu, logk_sigma) + _lognorm_logpdf(
-        lam, loglam_mu, loglam_sigma
-    )
+    return _lognorm_logpdf(k, logk_mu, logk_sigma) + _lognorm_logpdf(lam, loglam_mu, loglam_sigma)
 
 
 @dataclass
@@ -121,9 +111,7 @@ def _prior_sample_factory(cfg: Config) -> Callable[[jax.Array], jnp.ndarray]:
 
 def _make_spec(cfg: Config) -> ExperimentSpec:
     # Probe summaries to set s_dim
-    x_probe = cw.simulate(
-        jax.random.key(0), jnp.asarray(cfg.theta_true), n_obs=cfg.n_obs
-    )
+    x_probe = cw.simulate(jax.random.key(0), jnp.asarray(cfg.theta_true), n_obs=cfg.n_obs)
 
     # Choose observation DGP
     if cfg.obs_model == "assumed":
@@ -145,18 +133,14 @@ def _make_spec(cfg: Config) -> ExperimentSpec:
     #         return jnp.ravel(x)  # pass raw data to the embedder
 
     #     summaries_fn = flatten_raw
-    x_probe = cw.simulate(
-        jax.random.key(0), jnp.asarray(cfg.theta_true), n_obs=cfg.n_obs
-    )
+    x_probe = cw.simulate(jax.random.key(0), jnp.asarray(cfg.theta_true), n_obs=cfg.n_obs)
     s_dim = int(summaries_fn(x_probe).shape[-1])
     return ExperimentSpec(
         name="contaminated_weibull",
         theta_dim=2,
         s_dim=s_dim,
         prior_sample=_prior_sample_factory(cfg),
-        prior_logpdf=lambda th: _prior_logpdf_lognorm(
-            th, cfg.logk_mu, cfg.logk_sigma, cfg.loglam_mu, cfg.loglam_sigma
-        ),
+        prior_logpdf=lambda th: _prior_logpdf_lognorm(th, cfg.logk_mu, cfg.logk_sigma, cfg.loglam_mu, cfg.loglam_sigma),
         true_dgp=true_dgp,
         simulate=lambda key, theta, **kw: cw.simulate(key, theta, n_obs=cfg.n_obs),
         summaries=lambda x: summaries_fn(x),

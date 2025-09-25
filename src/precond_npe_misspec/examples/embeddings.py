@@ -48,9 +48,7 @@ def _ensure_bkt(x: Array, raw_shape: tuple[int, ...]) -> Array:
         T, K = int(raw_shape[0]), 1
     else:
         T, K = int(raw_shape[-2]), int(raw_shape[-1])
-    B = int(
-        x.size // (T * K)
-    )  # collapse all leading batch dims (incl. extra singleton)
+    B = int(x.size // (T * K))  # collapse all leading batch dims (incl. extra singleton)
     x_btk = jnp.reshape(x, (B, T, K))  # (B, T, K)
     return jnp.swapaxes(x_btk, -1, -2)  # (B, K, T)
 
@@ -69,18 +67,14 @@ def _causal_pad(x_bkt: Array, kernel: int, dilation: int) -> Array:
 
 
 @register("mlp_flat")
-def mlp_flat(
-    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
-) -> _EqxModule:
+def mlp_flat(key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any) -> _EqxModule:
     in_size = int(jnp.prod(jnp.array(raw_cond_shape)))
     mlp = MLP(
         in_size=in_size,
         out_size=int(embed_dim),
         width_size=int(getattr(cfg, "embed_width", 128)),
         depth=int(getattr(cfg, "embed_depth", 2)),
-        activation=(
-            jnn.relu if getattr(cfg, "activation", "relu") == "relu" else jnn.tanh
-        ),
+        activation=(jnn.relu if getattr(cfg, "activation", "relu") == "relu" else jnn.tanh),
         key=key,
     )
 
@@ -116,11 +110,7 @@ class _TCNBlock(_EqxModule):
         self.k, self.d = int(k), int(d)
         self.dil = Conv1d(in_ch, ch, kernel_size=k, dilation=d, use_bias=True, key=k1)
         self.pw = Conv1d(ch, ch, kernel_size=1, use_bias=True, key=k2)
-        self.proj = (
-            None
-            if in_ch == ch
-            else Conv1d(in_ch, ch, kernel_size=1, use_bias=True, key=k3)
-        )
+        self.proj = None if in_ch == ch else Conv1d(in_ch, ch, kernel_size=1, use_bias=True, key=k3)
 
     def __call__(self, x_bkt: Array) -> Array:
         # x_bkt: (B, C_in, T)
@@ -182,9 +172,7 @@ class _SVAR_TCN(_EqxModule):
 
 
 @register("tcn_small")
-def tcn_small(
-    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
-) -> _EqxModule:
+def tcn_small(key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any) -> _EqxModule:
     ch = int(getattr(cfg, "tcn_channels", 32))
     ksize = int(getattr(cfg, "tcn_kernel", 5))
     dilations = tuple(getattr(cfg, "tcn_dilations", (1, 2, 4)))
@@ -203,9 +191,7 @@ def tcn_small(
 
 
 @register("asv_tcn")
-def asv_tcn(
-    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
-) -> _EqxModule:
+def asv_tcn(key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any) -> _EqxModule:
     """Default embedder for alpha‑SV raw returns."""
     ch = int(getattr(cfg, "tcn_channels", 32))
     ksize = int(getattr(cfg, "tcn_kernel", 5))
@@ -226,9 +212,7 @@ def asv_tcn(
 
 
 @register("iid_deepset")
-def iid_deepset(
-    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
-) -> _EqxModule:
+def iid_deepset(key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any) -> _EqxModule:
     """
     DeepSets for iid 1D samples y[0:T):  φ: R->R^H, mean-pool over T,  ρ: R^H->R^{embed_dim}.
     Accepts x with shape (T,) or batched (..., T). Returns (embed_dim,) or batched (..., embed_dim).

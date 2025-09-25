@@ -10,9 +10,7 @@ type Array = jax.Array
 type PRNGKey = Array
 
 EPS = 1e-8
-LOG_EXP_SKEW_CONST = jnp.asarray(
-    -1.1395470994046486, dtype=jnp.float32
-)  # skew(log Exp(1))
+LOG_EXP_SKEW_CONST = jnp.asarray(-1.1395470994046486, dtype=jnp.float32)  # skew(log Exp(1))
 
 
 # -----------------------------
@@ -121,9 +119,7 @@ if __name__ == "__main__":
 
     # crude ABC pilot to show acceptance ignoring skew
     M = 2000
-    th_keys = jax.vmap(lambda i: random.fold_in(key, i))(
-        jnp.arange(M, dtype=jnp.uint32)
-    )
+    th_keys = jax.vmap(lambda i: random.fold_in(key, i))(jnp.arange(M, dtype=jnp.uint32))
     thetas = jax.vmap(prior_sample)(th_keys)
     x_sim = jax.vmap(lambda kk, th: simulate(kk, th, n_obs=n))(th_keys, thetas)
     S_sim = jax.vmap(ss_log)(x_sim)

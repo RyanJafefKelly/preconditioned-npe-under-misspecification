@@ -15,8 +15,10 @@ import jax.numpy as jnp
 import numpy as np
 import tyro
 
-from precond_npe_misspec.pipelines.base_pnpe import FlowConfig, default_posterior_flow_builder
-from precond_npe_misspec.utils.metrics import compute_rep_metrics, posterior_predictive_distance_on_summaries
+from precond_npe_misspec.pipelines.base_pnpe import (
+    FlowConfig, default_posterior_flow_builder)
+from precond_npe_misspec.utils.metrics import (
+    compute_rep_metrics, posterior_predictive_distance_on_summaries)
 
 
 @dataclass

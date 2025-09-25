@@ -8,23 +8,15 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from precond_npe_misspec.engine.run import (
-    NpeRsConfig,
-    PosteriorConfig,
-    PrecondConfig,
-    RobustConfig,
-    RunConfig,
-    run_experiment,
-)
+from precond_npe_misspec.engine.run import (NpeRsConfig, PosteriorConfig,
+                                            PrecondConfig, RobustConfig,
+                                            RunConfig, run_experiment)
 from precond_npe_misspec.examples.gnk import gnk as gnk_quantile
 from precond_npe_misspec.examples.gnk import prior_logpdf as gnk_prior_logpdf
 from precond_npe_misspec.examples.gnk import simulate as gnk_simulate
 from precond_npe_misspec.examples.gnk import ss_robust, true_dgp
 from precond_npe_misspec.pipelines.base_pnpe import (
-    ExperimentSpec,
-    FlowConfig,
-    default_posterior_flow_builder,
-)
+    ExperimentSpec, FlowConfig, default_posterior_flow_builder)
 
 
 def _prior_sample_factory(cfg: Config) -> Callable[[jax.Array], jnp.ndarray]:

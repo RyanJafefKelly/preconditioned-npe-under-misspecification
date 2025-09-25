@@ -42,9 +42,7 @@ def _make_dataset(
     @eqx.filter_jit  # compile two shapes at most (full and last partial)
     def _simulate_batch(th_keys: Array, sm_keys: Array) -> tuple[Array, Array, Array]:
         thetas_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
-            sm_keys, thetas_b
-        )  # (B, n_obs)
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, thetas_b)  # (B, n_obs)
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
         return thetas_b, S_b, xs_b
 
@@ -101,9 +99,7 @@ def _abc_rejection_with_sim(
         th_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
 
         sm_keys = jax.vmap(lambda i: jax.random.fold_in(k_sm_base, i))(idx)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
-            sm_keys, th_b
-        )
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, th_b)
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
 
         d_b = _to_vec(dist_fn(S_b, s_obs))  # (B,)
@@ -125,11 +121,7 @@ def _abc_rejection_with_sim(
     n_tot = int(d_all.shape[0])
 
     # Keep exactly n_keep: q in (0,1] => fraction; q>=1 => absolute count.
-    n_keep = (
-        max(1, min(n_tot, int(jnp.ceil(q * n_tot))))
-        if 0 < q <= 1.0
-        else max(1, min(n_tot, int(q)))
-    )
+    n_keep = max(1, min(n_tot, int(jnp.ceil(q * n_tot)))) if 0 < q <= 1.0 else max(1, min(n_tot, int(q)))
 
     idx = jnp.argpartition(d_all, n_keep - 1)[:n_keep]
     idx = idx[jnp.argsort(d_all[idx])]
@@ -152,9 +144,7 @@ def run_preconditioning(
       - method="rejection"  → rejection ABC
       - method="smc_abc"    → SMC‑ABC
     """
-    sim_kwargs = (
-        {} if getattr(run, "sim_kwargs", None) is None else dict(run.sim_kwargs)
-    )
+    sim_kwargs = {} if getattr(run, "sim_kwargs", None) is None else dict(run.sim_kwargs)
     batch_size = int(getattr(run, "batch_size", 512))
     method = run.precond.method
 
