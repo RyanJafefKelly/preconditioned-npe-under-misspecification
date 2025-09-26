@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-import os, time
+import os
+import time
 
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault(
-    "XLA_FLAGS", "--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
-)
+os.environ.setdefault("XLA_FLAGS", "--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1")
 os.environ.setdefault("BVCBM_POOL", "process")
 
-import jax, jax.numpy as jnp
-from precond_npe_misspec.pipelines.bvcbm import _make_spec, Config
+import jax
+import jax.numpy as jnp
+
 from precond_npe_misspec.algorithms.smc_abc import run_smc_abc
+from precond_npe_misspec.pipelines.bvcbm import Config, _make_spec
 
 
 def bench(workers: int, N: int, T: int, seed: int = 0) -> float:
@@ -67,6 +68,6 @@ if __name__ == "__main__":
     t1 = bench(1, N, T)
     print(f"SMCABC workers=1  time={t1:.2f}s")
     t2 = bench(2, N, T)
-    print(f"SMCABC workers=2  time={t2:.2f}s  speedup={t1/t2:.2f}×")
+    print(f"SMCABC workers=2  time={t2:.2f}s  speedup={t1 / t2:.2f}×")
     t4 = bench(4, N, T)
-    print(f"SMCABC workers=4  time={t4:.2f}s  speedup={t1/t4:.2f}×")
+    print(f"SMCABC workers=4  time={t4:.2f}s  speedup={t1 / t4:.2f}×")
