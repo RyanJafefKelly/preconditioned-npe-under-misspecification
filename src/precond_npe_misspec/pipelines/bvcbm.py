@@ -28,9 +28,7 @@ from precond_npe_misspec.pipelines.base_pnpe import (
 )
 
 
-def _uniform_logpdf_box(
-    theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray
-) -> jnp.ndarray:
+def _uniform_logpdf_box(theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) -> jnp.ndarray:
     th = jnp.asarray(theta)
     inside = jnp.all((th >= lo) & (th <= hi))
     return jnp.where(inside, 0.0, -jnp.inf)
@@ -132,9 +130,7 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
             (int(theta.shape[0]), T_fixed) if is_batched else (T_fixed,),
             jnp.float32,
         )
-        return jax.pure_callback(
-            _simulate_np, out_shape, theta, seed, vmap_method="broadcast_all"
-        )
+        return jax.pure_callback(_simulate_np, out_shape, theta, seed, vmap_method="broadcast_all")
 
     # Summaries
     if cfg.summary == "log":
@@ -143,9 +139,7 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
         summaries = lambda x: jnp.asarray(ex.summary_identity(jnp.asarray(x)))
 
     # Probe to infer summary dimension
-    x_probe = jnp.asarray(
-        sim_py(np.asarray(cfg.theta_true, float), seed=0), jnp.float32
-    )
+    x_probe = jnp.asarray(sim_py(np.asarray(cfg.theta_true, float), seed=0), jnp.float32)
     s_dim = int(summaries(x_probe).shape[-1])
 
     # Priors (Uniforms; g_age in hours, τ in days)
@@ -183,9 +177,7 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
             r"$g_{\mathrm{age}}^{(2)}\,[\mathrm{h}]$",
             r"$\tau\,[\mathrm{days}]$",
         ),
-        summary_labels=tuple(
-            f"{'logV' if cfg.summary=='log' else 'V'}[t={t}]" for t in range(s_dim)
-        ),
+        summary_labels=tuple(f"{'logV' if cfg.summary == 'log' else 'V'}[t={t}]" for t in range(s_dim)),
         theta_lo=lo,
         theta_hi=hi,
         simulate_path="precond_npe_misspec.examples.bvcbm:simulate_biphasic",  # adaptor to add in examples
@@ -200,12 +192,7 @@ def _load_real_observations(T: int) -> jnp.ndarray:
     except ImportError as exc:  # pragma: no cover - dependency check
         raise ImportError("scipy is required for obs_model='real'") from exc
 
-    data_path = (
-        Path(__file__).resolve().parents[2]
-        / "precond_npe_misspec"
-        / "data"
-        / "CancerDatasets.mat"
-    )
+    data_path = Path(__file__).resolve().parents[2] / "precond_npe_misspec" / "data" / "CancerDatasets.mat"
     if not data_path.exists():
         raise FileNotFoundError(f"Missing real data file at {data_path}")
 
@@ -216,9 +203,7 @@ def _load_real_observations(T: int) -> jnp.ndarray:
 
     control_growth = np.asarray(breast_data, dtype=float)
     if control_growth.shape[0] < T:
-        raise ValueError(
-            f"Requested T={T} exceeds available samples {control_growth.shape[0]}"
-        )
+        raise ValueError(f"Requested T={T} exceeds available samples {control_growth.shape[0]}")
     if control_growth.ndim < 2 or control_growth.shape[1] <= 3:
         raise ValueError("Unexpected shape for Breast_data; expected at least four columns")
 
