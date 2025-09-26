@@ -58,8 +58,8 @@ class Config:
         7.0,
     )
 
-    obs_model: Literal["synthetic", "real"] = "synthetic"
-    summary: Literal["identity", "log"] = "log"
+    obs_model: Literal["synthetic", "real"] = "real"
+    summary: Literal["identity", "log"] = "identity"
     embedder: str = "asv_tcn"
 
     # Engines

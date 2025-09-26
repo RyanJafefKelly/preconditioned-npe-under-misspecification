@@ -8,35 +8,46 @@
 set -euo pipefail
 cd "$PBS_O_WORKDIR"
 
-# Threads: 32 CPUs
-export OMP_NUM_THREADS=32
-export OPENBLAS_NUM_THREADS=$OMP_NUM_THREADS
-export MKL_NUM_THREADS=$OMP_NUM_THREADS
-export NUMEXPR_NUM_THREADS=$OMP_NUM_THREADS
-export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true --xla_cpu_multi_thread_eigen_thread_count=${OMP_NUM_THREADS}"
+# One thread per process; JAX on CPU only
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export JAX_PLATFORMS=cpu
+export XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 export MALLOC_ARENA_MAX=2
 
-# Tools/env
+# Process-pool config
+export BVCBM_POOL=process
+export BVCBM_WORKERS="${BVCBM_WORKERS:-${PBS_NCPUS:-32}}"
+# Optional: safer start method on Linux
+export BVCBM_START_METHOD="${BVCBM_START_METHOD:-}"
+
+# Real data (required if OBS_MODEL=real)
+export CANCER_DATASETS_MAT="${CANCER_DATASETS_MAT:-$PBS_O_WORKDIR/src/precond_npe_misspec/data/CancerDatasets.mat}"
+
+# Tooling
 export PATH="$HOME/.local/bin:$PATH"
 export UV_CACHE_DIR="${SCRATCH:-$HOME}/.cache/uv"
 export UV_PROJECT_ENVIRONMENT="$PBS_O_WORKDIR/.venv"
-which uv >/dev/null 2>&1 || { echo "uv missing"; exit 127; }
+uv --version >/dev/null 2>&1 || { echo "uv missing"; exit 127; }
+uv sync --no-dev --frozen --python 3.13
 
-# Inputs (override via qsub -v ...)
+# Inputs
 R=${R:-1}
-METHODS_STR=${METHODS_STR:-"npe pnpe prnpe rnpe"}
+METHODS_STR=${METHODS_STR:-"pnpe prnpe rnpe"}   # add 'npe' if desired
 OBS_SEED_OFFSET=${OBS_SEED_OFFSET:-1234}
 
 # BVCBM defaults
 export T="${T:-32}"
 export START_VOLUME="${START_VOLUME:-50.0}"
 export PAGE="${PAGE:-5}"
-export SUMMARY="${SUMMARY:-identity}"         # log|identity
+export SUMMARY="${SUMMARY:-identity}"           # log|identity
 export OBS_MODEL="${OBS_MODEL:-real}"
 
-# Pilot SMC defaults
+# SMC‑ABC defaults
 export SMC_N_PARTICLES="${SMC_N_PARTICLES:-2000}"
 export SMC_ALPHA="${SMC_ALPHA:-0.5}"
 export SMC_EPSILON0="${SMC_EPSILON0:-1e6}"
@@ -51,7 +62,7 @@ export SMC_B_SIM="${SMC_B_SIM:-1}"
 export N_SIMS="${N_SIMS:-20000}"
 export N_POSTERIOR_DRAWS="${N_POSTERIOR_DRAWS:-20000}"
 
-# Derive (method, seed) from array index
+# Array indexing
 IDX=${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-0}}
 IFS=' ' read -r -a METHODS <<< "$METHODS_STR"
 M=${#METHODS[@]}
@@ -63,16 +74,12 @@ METHOD="${METHODS[$MID]}"
 export SEED="$RID"
 export OBS_SEED="$(( SEED + OBS_SEED_OFFSET ))"
 
-echo "[env] host=$(hostname) jobid=${PBS_JOBID} idx=${IDX} method=${METHOD} rep=${RID}"
+echo "[env] host=$(hostname) jobid=${PBS_JOBID} idx=${IDX} method=${METHOD} rep=${RID} workers=${BVCBM_WORKERS}"
 mkdir -p logs/bvcbm results/_done
 
-# Run
 case "$METHOD" in
-  npe|pnpe|prnpe|rnpe)
-    bash "experiments/bvcbm/run_${METHOD}.sh" 2>&1 | tee "logs/bvcbm/${METHOD}_rep${RID}.log"
-    ;;
-  *)
-    echo "Unknown method: $METHOD" >&2; exit 3 ;;
+  npe|pnpe|prnpe|rnpe) bash "experiments/bvcbm/run_${METHOD}.sh" 2>&1 | tee "logs/bvcbm/${METHOD}_rep${RID}.log" ;;
+  *) echo "Unknown method: $METHOD" >&2; exit 3 ;;
 esac
 
 echo "$(date) method=$METHOD rep=$RID ok" > "results/_done/bvcbm_${METHOD}_rep${RID}.ok"
