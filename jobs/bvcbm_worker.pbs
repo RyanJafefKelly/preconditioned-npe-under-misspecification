@@ -25,16 +25,16 @@ export UV_PROJECT_ENVIRONMENT="$PBS_O_WORKDIR/.venv"
 which uv >/dev/null 2>&1 || { echo "uv missing"; exit 127; }
 
 # Inputs (override via qsub -v ...)
-R=${R:-5}
+R=${R:-1}
 METHODS_STR=${METHODS_STR:-"npe pnpe prnpe rnpe"}
 OBS_SEED_OFFSET=${OBS_SEED_OFFSET:-1234}
 
 # BVCBM defaults
-export T="${T:-19}"
+export T="${T:-32}"
 export START_VOLUME="${START_VOLUME:-50.0}"
 export PAGE="${PAGE:-5}"
-export SUMMARY="${SUMMARY:-log}"         # log|identity
-export OBS_MODEL="${OBS_MODEL:-synthetic}"
+export SUMMARY="${SUMMARY:-identity}"         # log|identity
+export OBS_MODEL="${OBS_MODEL:-real}"
 
 # Pilot SMC defaults
 export SMC_N_PARTICLES="${SMC_N_PARTICLES:-2000}"
