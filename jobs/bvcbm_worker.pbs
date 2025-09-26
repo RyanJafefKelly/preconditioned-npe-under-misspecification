@@ -1,0 +1,78 @@
+#!/bin/bash -l
+#PBS -N bvcbm_worker
+#PBS -l walltime=48:00:00
+#PBS -l mem=64GB
+#PBS -l ncpus=32
+#PBS -j oe
+
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+
+# Threads: 32 CPUs
+export OMP_NUM_THREADS=32
+export OPENBLAS_NUM_THREADS=$OMP_NUM_THREADS
+export MKL_NUM_THREADS=$OMP_NUM_THREADS
+export NUMEXPR_NUM_THREADS=$OMP_NUM_THREADS
+export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true --xla_cpu_multi_thread_eigen_thread_count=${OMP_NUM_THREADS}"
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
+export MALLOC_ARENA_MAX=2
+
+# Tools/env
+export PATH="$HOME/.local/bin:$PATH"
+export UV_CACHE_DIR="${SCRATCH:-$HOME}/.cache/uv"
+export UV_PROJECT_ENVIRONMENT="$PBS_O_WORKDIR/.venv"
+which uv >/dev/null 2>&1 || { echo "uv missing"; exit 127; }
+
+# Inputs (override via qsub -v ...)
+R=${R:-5}
+METHODS_STR=${METHODS_STR:-"npe pnpe prnpe rnpe"}
+OBS_SEED_OFFSET=${OBS_SEED_OFFSET:-1234}
+
+# BVCBM defaults
+export T="${T:-19}"
+export START_VOLUME="${START_VOLUME:-50.0}"
+export PAGE="${PAGE:-5}"
+export SUMMARY="${SUMMARY:-log}"         # log|identity
+export OBS_MODEL="${OBS_MODEL:-synthetic}"
+
+# Pilot SMC defaults
+export SMC_N_PARTICLES="${SMC_N_PARTICLES:-2000}"
+export SMC_ALPHA="${SMC_ALPHA:-0.5}"
+export SMC_EPSILON0="${SMC_EPSILON0:-1e6}"
+export SMC_EPS_MIN="${SMC_EPS_MIN:-1e-3}"
+export SMC_ACC_MIN="${SMC_ACC_MIN:-0.10}"
+export SMC_MAX_ITERS="${SMC_MAX_ITERS:-4}"
+export SMC_INITIAL_R="${SMC_INITIAL_R:-1}"
+export SMC_C_TUNING="${SMC_C_TUNING:-0.01}"
+export SMC_B_SIM="${SMC_B_SIM:-1}"
+
+# Training sizes
+export N_SIMS="${N_SIMS:-20000}"
+export N_POSTERIOR_DRAWS="${N_POSTERIOR_DRAWS:-20000}"
+
+# Derive (method, seed) from array index
+IDX=${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-0}}
+IFS=' ' read -r -a METHODS <<< "$METHODS_STR"
+M=${#METHODS[@]}
+R_TOTAL=$((R * M))
+(( IDX >= 0 && IDX < R_TOTAL )) || { echo "Bad array index $IDX (R=$R M=$M)"; exit 2; }
+MID=$(( IDX / R ))
+RID=$(( IDX % R ))
+METHOD="${METHODS[$MID]}"
+export SEED="$RID"
+export OBS_SEED="$(( SEED + OBS_SEED_OFFSET ))"
+
+echo "[env] host=$(hostname) jobid=${PBS_JOBID} idx=${IDX} method=${METHOD} rep=${RID}"
+mkdir -p logs/bvcbm results/_done
+
+# Run
+case "$METHOD" in
+  npe|pnpe|prnpe|rnpe)
+    bash "experiments/bvcbm/run_${METHOD}.sh" 2>&1 | tee "logs/bvcbm/${METHOD}_rep${RID}.log"
+    ;;
+  *)
+    echo "Unknown method: $METHOD" >&2; exit 3 ;;
+esac
+
+echo "$(date) method=$METHOD rep=$RID ok" > "results/_done/bvcbm_${METHOD}_rep${RID}.ok"
