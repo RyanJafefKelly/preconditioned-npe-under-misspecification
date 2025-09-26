@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from typing import Callable, Iterable
 
 import jax
@@ -10,6 +11,19 @@ try:
     import tumourmodel as tm
 except Exception as e:  # pragma: no cover
     raise ImportError("tumourmodel not installed or failed to import") from e
+
+_SIM_FN = None  # set in initializer
+
+
+def _init_bvcbm_worker(T: int, start_volume: float, page: int) -> None:
+    global _SIM_FN
+    _SIM_FN = simulator_biphasic(T=T, start_volume=start_volume, page=page)
+
+
+def simulate_worker(theta: np.ndarray, seed: int) -> np.ndarray:
+    if _SIM_FN is None:  # guard: should not be called in main process
+        raise RuntimeError("_SIM_FN not initialised in worker")
+    return np.asarray(_SIM_FN(np.asarray(theta, float), int(seed)), dtype=np.float32)
 
 
 # ---------------- Simulators (host) ----------------
