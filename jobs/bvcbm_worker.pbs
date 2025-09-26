@@ -1,6 +1,6 @@
 #!/bin/bash -l
 #PBS -N bvcbm_worker
-#PBS -l walltime=48:00:00
+#PBS -l walltime=47:00:00
 #PBS -l mem=64GB
 #PBS -l ncpus=32
 #PBS -j oe
@@ -22,6 +22,7 @@ export MALLOC_ARENA_MAX=2
 # Process-pool config
 export BVCBM_POOL=process
 export BVCBM_WORKERS="${BVCBM_WORKERS:-${PBS_NCPUS:-32}}"
+export BVCBM_START_METHOD=spawn
 # Optional: safer start method on Linux
 export BVCBM_START_METHOD="${BVCBM_START_METHOD:-}"
 
