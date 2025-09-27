@@ -63,11 +63,17 @@ def _make_dataset(
 
     mask_theta = jnp.all(jnp.isfinite(thetas), axis=1)
     mask_S = jnp.all(jnp.isfinite(S), axis=1)
-    mask = mask_theta & mask_S
+    S_MAX = jnp.asarray(1e30, dtype=S.dtype)
+    mask_mag = jnp.all(jnp.abs(S) < S_MAX, axis=1)
+
+    mask = mask_theta & mask_S & mask_mag
 
     thetas = thetas[mask]
     S = S[mask]
     xs = xs[mask]
+
+    print(f"jnp.max(S)={jnp.max(S)}, jnp.min(thetas)={jnp.min(S)}")
+    print(f"Is nan: {jnp.sum(jnp.isnan(thetas))}")
 
     return thetas, S, xs
 

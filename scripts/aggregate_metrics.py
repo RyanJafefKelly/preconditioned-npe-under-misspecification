@@ -30,7 +30,7 @@ class Args:
 
 # ---------- Utilities ----------
 
-_METHODS_ORDER = ("npe", "pnpe", "rnpe", "prnpe")
+_METHODS_ORDER = ("npe", "pnpe", "rnpe", "prnpe", "npe_rs", "pnpe_rs")
 _TS_PAT = re.compile(r"^\d{8}-\d{6}$")
 
 
@@ -372,7 +372,14 @@ def _aggregate(args: Args) -> None:
                     print(f"[info] samples not found/bad shape in {run_dir}")
 
             assert theta_dim is not None
-            _append_array(cov_hpdi, method=m, parsed=parsed, key="hpdi_cov", theta_dim=theta_dim, md_path=md_path)
+            _append_array(
+                cov_hpdi,
+                method=m,
+                parsed=parsed,
+                key="hpdi_cov",
+                theta_dim=theta_dim,
+                md_path=md_path,
+            )
             _append_array(
                 cov_central,
                 method=m,
@@ -381,8 +388,22 @@ def _aggregate(args: Args) -> None:
                 theta_dim=theta_dim,
                 md_path=md_path,
             )
-            _append_array(bias, method=m, parsed=parsed, key="bias", theta_dim=theta_dim, md_path=md_path)
-            _append_array(mse, method=m, parsed=parsed, key="mse", theta_dim=theta_dim, md_path=md_path)
+            _append_array(
+                bias,
+                method=m,
+                parsed=parsed,
+                key="bias",
+                theta_dim=theta_dim,
+                md_path=md_path,
+            )
+            _append_array(
+                mse,
+                method=m,
+                parsed=parsed,
+                key="mse",
+                theta_dim=theta_dim,
+                md_path=md_path,
+            )
 
             if isinstance(parsed.get("logprob"), (int | float)):
                 logprob[m].append(float(parsed["logprob"]))
