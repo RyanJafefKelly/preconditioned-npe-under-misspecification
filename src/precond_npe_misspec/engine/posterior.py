@@ -63,6 +63,8 @@ def fit_posterior_flow(
     cap = jnp.asarray(1e30, dtype=raw_std.dtype)
     S_mean = jnp.clip(raw_mean, a_min=-cap, a_max=cap)
     S_std = jnp.clip(raw_std, a_min=None, a_max=cap) + EPS
+    print("S_mean", S_mean)
+    print("S_std", S_std)
 
     S_proc = _standardise(S_train, S_mean, S_std)
 

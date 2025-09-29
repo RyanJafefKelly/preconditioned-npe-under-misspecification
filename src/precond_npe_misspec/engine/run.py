@@ -13,17 +13,18 @@ import numpy as _np
 
 from precond_npe_misspec.utils.artifacts import save_artifacts
 
-from .npe_rs import LossHistory, fit_posterior_flow_npe_rs
+from .npe_rs import fit_posterior_flow_npe_rs
 from .posterior import fit_posterior_flow, sample_posterior
 from .preconditioning import run_preconditioning
 from .robust import denoise_s, fit_s_flow, sample_robust_posterior
 
 type Array = jax.Array
+type LossHistory = dict[str, list[float]]
 
 
 @dataclass(frozen=True)
 class PrecondConfig:
-    method: Literal["none", "rejection", "smc_abc"] = "none"
+    method: Literal["none", "rejection", "smc_abc"] = "smc_abc"
     n_sims: int = 200_000
     q_precond: float = 0.2
     # SMC‑ABC
@@ -32,7 +33,7 @@ class PrecondConfig:
     smc_epsilon0: float = 1e6
     smc_eps_min: float = 1e-3
     smc_acc_min: float = 0.1
-    smc_max_iters: int = 30
+    smc_max_iters: int = 5
     smc_initial_R: int = 1
     smc_c_tuning: float = 0.01
     smc_B_sim: int = 1
@@ -69,7 +70,7 @@ class NpeRsConfig:
     embed_width: int = 128
     embed_depth: int = 2
     activation: Literal["relu", "tanh"] = "relu"
-    mmd_weight: float = 0.1
+    mmd_weight: float = 1.0
     kernel: Literal["rbf", "imq"] = "rbf"
     mmd_subsample: int | None = 256
     bandwidth: float | Literal["median"] = "median"
@@ -131,19 +132,26 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
 
         # keys = jax.random.split(k_sim, theta_tr.shape[0])
         # X_tr = jax.vmap(_sim_one)(keys, theta_tr)
-        q_theta_s_rs, X_mean, X_std, th_mean, th_std, losses_theta = fit_posterior_flow_npe_rs(
+        q_theta_s_rs, X_mean, X_std, th_mean, th_std, losses_dict = fit_posterior_flow_npe_rs(
             k_fit, spec, theta_tr, X_tr, x_obs, flow_cfg, run.npers
         )
         q_theta_s = cast(Any, q_theta_s_rs)
         # For downstream compatibility, reuse S_* slots for x-whitening stats.
         S_mean, S_std = X_mean, X_std
+        # loss_history: LossHistory = cast(LossHistory, losses_dict)
 
     else:
         q_theta_s_std, S_mean, S_std, th_mean, th_std, losses_list = fit_posterior_flow(
             k_fit, spec, theta_tr, S_tr, flow_cfg
         )
         q_theta_s = cast(Any, q_theta_s_std)
-        losses_theta = cast(LossHistory, {"nll": list(losses_list)})
+        if isinstance(losses_list, dict):
+            losses_dict = {str(split): list(_np.asarray(values)) for split, values in losses_list.items()}
+        else:
+            losses_dict = {"nll": list(_np.asarray(losses_list))}
+        # loss_history = cast(LossHistory, losses_dict)
+
+        # losses_theta = cast(LossHistory, {"nll": list(losses_list)})
     if run.posterior.method == "npe_rs":
         x_obs_w = (x_obs - X_mean) / (X_std + 1e-8)
         print("x_obs_w: ", x_obs_w)
@@ -169,7 +177,7 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             th_mean_post=th_mean,
             th_std_post=th_std,
             posterior_samples_at_obs=theta_samps,
-            loss_history_theta=losses_theta,
+            loss_history_theta=losses_dict,
         )
     elif run.posterior.method == "rnpe":
         # RNPE: fit q(s), denoise, then mix q(theta|s)
@@ -201,7 +209,7 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             th_mean_post=th_mean,
             th_std_post=th_std,
             posterior_samples_at_obs=theta_samps_robust,  # for metrics compatibility
-            loss_history_theta=losses_theta,
+            loss_history_theta=losses_list,
             denoised_s_samples=s_denoised_w,
             misspec_probs=misspec_probs,
         )
