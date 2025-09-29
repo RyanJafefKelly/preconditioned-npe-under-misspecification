@@ -115,12 +115,12 @@ def theta_bounds_biphasic(T: int) -> tuple[jnp.ndarray, jnp.ndarray]:
 
 def prior_monophasic(T: int) -> dist.Distribution:
     lo, hi = theta_bounds_monophasic(T)
-    return dist.Independent(dist.Uniform(low=lo, high=hi), 1)
+    return dist.Independent(dist.Uniform(low=lo, high=hi, validate_args=True), 1)
 
 
 def prior_biphasic(T: int) -> dist.Distribution:
     lo, hi = theta_bounds_biphasic(T)
-    return dist.Independent(dist.Uniform(low=lo, high=hi), 1)
+    return dist.Independent(dist.Uniform(low=lo, high=hi, validate_args=True), 1)
 
 
 # ---------------- Adaptors for pipeline paths (non-jitted) ----------------

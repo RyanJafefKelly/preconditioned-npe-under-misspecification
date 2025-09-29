@@ -14,20 +14,29 @@ import numpy as np
 import tyro
 from jax import ShapeDtypeStruct
 
-from precond_npe_misspec.engine.run import (NpeRsConfig, PosteriorConfig,
-                                            PrecondConfig, RobustConfig,
-                                            RunConfig, run_experiment)
+from precond_npe_misspec.engine.run import (
+    NpeRsConfig,
+    PosteriorConfig,
+    PrecondConfig,
+    RobustConfig,
+    RunConfig,
+    run_experiment,
+)
 from precond_npe_misspec.examples import bvcbm as ex
 from precond_npe_misspec.examples.embeddings import build as get_embedder
 from precond_npe_misspec.pipelines.base_pnpe import (
-    ExperimentSpec, FlowConfig, default_posterior_flow_builder)
+    ExperimentSpec,
+    FlowConfig,
+    default_posterior_flow_builder,
+)
 
-# def _uniform_logpdf_box(
-#     theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray
-# ) -> jnp.ndarray:
-#     th = jnp.asarray(theta)
-#     inside = jnp.all((th >= lo) & (th <= hi))
-#     return jnp.where(inside, 0.0, -jnp.inf)
+
+def _uniform_logpdf_box(
+    theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray
+) -> jnp.ndarray:
+    th = jnp.asarray(theta)
+    inside = jnp.all((th >= lo) & (th <= hi))
+    return jnp.where(inside, 0.0, -jnp.inf)
 
 
 # ---------- Public config ----------
@@ -174,7 +183,7 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
         return cast(jax.Array, prior.sample(key))
 
     def prior_logpdf(th: jax.Array) -> jax.Array:  # or _uniform_logpdf_box(th, lo, hi)
-        return cast(jax.Array, prior.log_prob(th))
+        return _uniform_logpdf_box(th, lo, hi)
 
     # Observed DGP
     if cfg.obs_model == "synthetic":
@@ -217,7 +226,7 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
         theta_lo=lo,
         theta_hi=hi,
         simulate_path="precond_npe_misspec.examples.bvcbm:simulate_biphasic",  # adaptor to add in examples
-        summaries_path="precond_npe_misspec.examples.bvcbm:summary_log",
+        summaries_path="precond_npe_misspec.examples.bvcbm:summary_identity",
     )
 
 
