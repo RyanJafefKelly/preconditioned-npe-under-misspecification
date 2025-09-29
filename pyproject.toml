@@ -15,7 +15,8 @@ dependencies = [
     "tyro>=0.9.28",
     "yfinance>=0.2.65",
     "blackjax",
-    "tumourmodel"
+    "tumourmodel",
+    "scikit-learn>=1.7.2",
 ]
 
 [build-system]
