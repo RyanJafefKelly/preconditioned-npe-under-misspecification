@@ -53,14 +53,10 @@ def simulator_monophasic(T: int, start_volume: float = 50.0, page: int = 5) -> S
 def simulator_biphasic(T: int, start_volume: float = 50.0, page: int = 5) -> SimFn:
     """theta = (p0_1, psc_1, dmax_1, gage_1, p0_2, psc_2, dmax_2, gage_2, tau)."""
     if not hasattr(tm, "simulate_biphasic"):
-        raise RuntimeError(
-            "tumourmodel.simulate_biphasic missing; add binding in tumourmodel-py"
-        )
+        raise RuntimeError("tumourmodel.simulate_biphasic missing; add binding in tumourmodel-py")
 
     def f(theta: Iterable[float], seed: int) -> np.ndarray:
-        p0_1, psc_1, dmax_1, gage_1, p0_2, psc_2, dmax_2, gage_2, tau = [
-            float(x) for x in theta
-        ]
+        p0_1, psc_1, dmax_1, gage_1, p0_2, psc_2, dmax_2, gage_2, tau = [float(x) for x in theta]
         result = tm.simulate_biphasic(
             [p0_1, psc_1, int(round(dmax_1)), int(round(gage_1)), int(page)],
             [p0_2, psc_2, int(round(dmax_2)), int(round(gage_2)), int(page)],
@@ -134,9 +130,7 @@ def simulate(
 ) -> jax.Array:
     """Monophasic adaptor (kept for completeness)."""
     fn = simulator_monophasic(T=T, start_volume=start_volume, page=page)
-    seed = int(
-        jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32))
-    )
+    seed = int(jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32)))
     return jnp.asarray(fn(theta, seed), dtype=jnp.float32)
 
 
@@ -150,9 +144,7 @@ def simulate_biphasic(
 ) -> jax.Array:
     """Biphasic adaptor used by pipeline simulate_path. Not for use under jit/vmap."""
     fn = simulator_biphasic(T=T, start_volume=start_volume, page=page)
-    seed = int(
-        jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32))
-    )
+    seed = int(jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32)))
     return jnp.asarray(fn(theta, seed), dtype=jnp.float32)
 
 
