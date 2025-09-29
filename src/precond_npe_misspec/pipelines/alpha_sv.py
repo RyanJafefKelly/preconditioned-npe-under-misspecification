@@ -50,8 +50,8 @@ class Config:
     obs_model: Literal["assumed", "true"] = "true"
 
     # Real data (used when obs_model=="true")
-    yahoo_start: str = "2013-01-02"
-    yahoo_end: str = "2017-02-07"
+    yahoo_start: str = "2008-01-01"
+    yahoo_end: str = "2017-03-13"
     yahoo_field: str = "Close"
     yahoo_log_returns: bool = True
     yahoo_standardise: bool = False

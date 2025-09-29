@@ -18,6 +18,8 @@ from precond_npe_misspec.examples.gnk import ss_robust, true_dgp
 from precond_npe_misspec.pipelines.base_pnpe import (
     ExperimentSpec, FlowConfig, default_posterior_flow_builder)
 
+type Array = jax.Array
+
 
 def _prior_sample_factory(cfg: Config) -> Callable[[jax.Array], jnp.ndarray]:
     lo = jnp.array([cfg.A_min, cfg.B_min, cfg.g_min, cfg.k_min])
@@ -62,7 +64,16 @@ class Config:
 def main(cfg: Config) -> None:
     # derive s_dim from a probe
     x_probe = true_dgp(jax.random.key(0), n_obs=cfg.n_obs)
-    s_dim = int(ss_robust(x_probe).shape[-1])
+
+    summaries_fn = ss_robust
+    if cfg.posterior.method == "npe_rs":
+
+        def flatten_raw(x: Array) -> Array:
+            return jnp.ravel(x)  # pass raw data to the embedder
+
+        summaries_fn = flatten_raw
+
+    s_dim = int(summaries_fn(x_probe).shape[-1])
     spec = ExperimentSpec(
         name="gnk",
         theta_dim=4,
@@ -81,7 +92,7 @@ def main(cfg: Config) -> None:
         ),
         true_dgp=lambda key, _, **kw: true_dgp(key, n_obs=cfg.n_obs),
         simulate=lambda key, th, **kw: gnk_simulate(key, th, n_obs=cfg.n_obs),
-        summaries=ss_robust,  # TODO! FIX?
+        summaries=summaries_fn,
         build_posterior_flow=default_posterior_flow_builder(4, s_dim),
         theta_lo=jnp.array([cfg.A_min, cfg.B_min, cfg.g_min, cfg.k_min]),
         theta_hi=jnp.array([cfg.A_max, cfg.B_max, cfg.g_max, cfg.k_max]),

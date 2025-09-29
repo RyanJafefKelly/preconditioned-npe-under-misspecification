@@ -1,39 +1,33 @@
 # src/precond_npe_misspec/pipelines/bvcbm.py
 from __future__ import annotations
 
-from collections.abc import Callable
+import multiprocessing as mp
+import os
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, Protocol, cast
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import tyro
+from jax import ShapeDtypeStruct
 
-from precond_npe_misspec.engine.run import (
-    NpeRsConfig,
-    PosteriorConfig,
-    PrecondConfig,
-    RobustConfig,
-    RunConfig,
-    run_experiment,
-)
+from precond_npe_misspec.engine.run import (NpeRsConfig, PosteriorConfig,
+                                            PrecondConfig, RobustConfig,
+                                            RunConfig, run_experiment)
 from precond_npe_misspec.examples import bvcbm as ex
 from precond_npe_misspec.examples.embeddings import build as get_embedder
 from precond_npe_misspec.pipelines.base_pnpe import (
-    ExperimentSpec,
-    FlowConfig,
-    default_posterior_flow_builder,
-)
+    ExperimentSpec, FlowConfig, default_posterior_flow_builder)
 
-
-def _uniform_logpdf_box(
-    theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray
-) -> jnp.ndarray:
-    th = jnp.asarray(theta)
-    inside = jnp.all((th >= lo) & (th <= hi))
-    return jnp.where(inside, 0.0, -jnp.inf)
+# def _uniform_logpdf_box(
+#     theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray
+# ) -> jnp.ndarray:
+#     th = jnp.asarray(theta)
+#     inside = jnp.all((th >= lo) & (th <= hi))
+#     return jnp.where(inside, 0.0, -jnp.inf)
 
 
 # ---------- Public config ----------
@@ -78,17 +72,20 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
 
     # --- host simulator via callback (JAX-safe) ---
     T_fixed = int(T_sim)
-    sim_py: Callable[[np.ndarray, int], np.ndarray] = ex.simulator_biphasic(
-        T=T_fixed, start_volume=cfg.start_volume, page=cfg.page
-    )
 
-    import os
-    from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-    import multiprocessing as mp
+    class _SimFn(Protocol):
+        def __call__(self, theta: np.ndarray, seed: int) -> np.ndarray: ...
+
+    sim_py: _SimFn = cast(
+        _SimFn,
+        ex.simulator_biphasic(T=T_fixed, start_volume=cfg.start_volume, page=cfg.page),
+    )
 
     _N_WORKERS = int(os.getenv("BVCBM_WORKERS", "1"))
     _POOL = os.getenv("BVCBM_POOL", "process")  # "process" | "thread"
     _START = os.getenv("BVCBM_START_METHOD", "spawn")  # spawn|forkserver|fork
+
+    _EXEC: ProcessPoolExecutor | ThreadPoolExecutor | None = None
 
     if _N_WORKERS > 1 and _POOL == "process":
         ctx = mp.get_context(_START)
@@ -101,10 +98,15 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
         _WORKER = ex.simulate_worker  # (theta, seed) -> (T,)
     elif _N_WORKERS > 1 and _POOL == "thread":
         _EXEC = ThreadPoolExecutor(max_workers=_N_WORKERS)
-        _WORKER = lambda th, sd: sim_py(th, int(sd))
+
+        def _WORKER(theta: np.ndarray, seed: int) -> np.ndarray:
+            return sim_py(theta, int(seed))
+
     else:
         _EXEC = None
-        _WORKER = lambda th, sd: sim_py(th, int(sd))
+
+        def _WORKER(theta: np.ndarray, seed: int) -> np.ndarray:
+            return sim_py(theta, int(seed))
 
     def _simulate_np(theta_np: np.ndarray, seed_np: np.ndarray) -> np.ndarray:
         th = np.asarray(theta_np, dtype=float)
@@ -129,23 +131,34 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
             ys = list(_EXEC.map(_WORKER, list(th), list(seeds.astype(int))))
         return np.asarray(ys, dtype=np.float32)  # (B, T_fixed)
 
-    def simulate(key, theta, **kw):
+    def simulate(key: jax.Array, theta: jax.Array, **kw: Any) -> jax.Array:
         seed = jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32)
         # shape-aware result spec: (T,) if unbatched, else (B, T)
         is_batched = len(theta.shape) == 2
-        out_shape = jax.ShapeDtypeStruct(
-            (int(theta.shape[0]), T_fixed) if is_batched else (T_fixed,),
-            jnp.float32,
+        shape: tuple[int, ...] = (
+            (int(theta.shape[0]), T_fixed) if is_batched else (T_fixed,)
         )
-        return jax.pure_callback(
-            _simulate_np, out_shape, theta, seed, vmap_method="broadcast_all"
+        out_shape: ShapeDtypeStruct = ShapeDtypeStruct(  # type: ignore[no-untyped-call]
+            shape, jnp.float32
         )
+        result: jax.Array = cast(
+            jax.Array,
+            jax.pure_callback(
+                _simulate_np, out_shape, theta, seed, vmap_method="broadcast_all"
+            ),
+        )
+        return result
 
     # Summaries
     if cfg.summary == "log":
-        summaries = lambda x: jnp.asarray(ex.summary_log(jnp.asarray(x)))
+
+        def summaries(x: jax.Array | np.ndarray) -> jax.Array:
+            return jnp.asarray(ex.summary_log(jnp.asarray(x)))
+
     else:
-        summaries = lambda x: jnp.asarray(ex.summary_identity(jnp.asarray(x)))
+
+        def summaries(x: jax.Array | np.ndarray) -> jax.Array:
+            return jnp.asarray(ex.summary_identity(jnp.asarray(x)))
 
     # Probe to infer summary dimension
     x_probe = jnp.asarray(
@@ -156,15 +169,25 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
     # Priors (Uniforms; g_age in hours, τ in days)
     lo, hi = ex.theta_bounds_biphasic(T_sim)
     prior = ex.prior_biphasic(T_sim)
-    prior_sample = lambda key: prior.sample(key)
-    prior_logpdf = lambda th: prior.log_prob(th)  # or _uniform_logpdf_box(th, lo, hi)
+
+    def prior_sample(key: jax.Array) -> jax.Array:
+        return cast(jax.Array, prior.sample(key))
+
+    def prior_logpdf(th: jax.Array) -> jax.Array:  # or _uniform_logpdf_box(th, lo, hi)
+        return cast(jax.Array, prior.log_prob(th))
 
     # Observed DGP
     if cfg.obs_model == "synthetic":
-        true_dgp = lambda key, theta, **kw: simulate(key, theta, T=T_sim)
+
+        def true_dgp(key: jax.Array, theta: jax.Array, **kw: Any) -> jax.Array:
+            return simulate(key, theta, T=T_sim)
+
     else:
         assert y_obs is not None, "y_obs must be provided when obs_model='real'"
-        true_dgp = lambda key, _theta, **kw: y_obs
+
+        def true_dgp(key: jax.Array, theta: jax.Array, **kw: Any) -> jax.Array:
+            del theta  # avoid unused-arg warnings
+            return y_obs
 
     return ExperimentSpec(
         name="bvcbm_biphasic",

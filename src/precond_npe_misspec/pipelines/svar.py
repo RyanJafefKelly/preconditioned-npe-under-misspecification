@@ -57,12 +57,12 @@ def _make_spec(cfg: Config) -> ExperimentSpec:
 
     summaries_fn = svar_summaries
 
-    # if cfg.posterior.method == "npe_rs":
-    #     # for NPE-RS use identity for preconditioning
-    #     def svar_flatten(x: Array, pairs: Array) -> Array:
-    #         return jnp.ravel(x)
+    if cfg.posterior.method == "npe_rs":
+        # for NPE-RS use identity for preconditioning
+        def svar_flatten(x: Array, pairs: Array) -> Array:
+            return jnp.ravel(x)
 
-    #     summaries_fn = svar_flatten  # type: ignore
+        summaries_fn = svar_flatten  # type: ignore
 
     # probe summaries to get s_dim
     x_probe = svar_assumed_dgp(
@@ -99,14 +99,16 @@ def _make_spec(cfg: Config) -> ExperimentSpec:
         prior_sample=lambda key: svar_prior_sample(key, pairs=pairs),
         prior_logpdf=lambda th: svar_prior_logpdf(th, pairs=pairs),
         true_dgp=true_dgp,
-        simulate=lambda key, theta, **kw: svar_assumed_dgp(key, theta, k=cfg.k, T=cfg.T, pairs=pairs),
+        simulate=lambda key, theta, **kw: svar_assumed_dgp(
+            key, theta, k=cfg.k, T=cfg.T, pairs=pairs
+        ),
         summaries=lambda x: summaries_fn(x, pairs=pairs),
         build_posterior_flow=default_posterior_flow_builder(theta_dim, s_dim),
         theta_lo=jnp.array([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 0]),
         theta_hi=jnp.ones(7),
         simulate_path="precond_npe_misspec.examples.svar:simulate",
         summaries_path="precond_npe_misspec.examples.svar:summaries_for_metrics",
-        build_embedder=get_embedder("tcn_small"),
+        build_embedder=get_embedder("svar_lagstats"),
         # leave theta bounds None → train in unconstrained space
     )
 
