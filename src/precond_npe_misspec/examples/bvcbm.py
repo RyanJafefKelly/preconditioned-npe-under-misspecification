@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
+from typing import Protocol
 
 import jax
 import jax.numpy as jnp
@@ -12,7 +13,12 @@ try:
 except Exception as e:  # pragma: no cover
     raise ImportError("tumourmodel not installed or failed to import") from e
 
-_SIM_FN = None  # set in initializer
+
+class SimFn(Protocol):
+    def __call__(self, theta: Iterable[float], seed: int) -> np.ndarray: ...
+
+
+_SIM_FN: SimFn | None = None  # set in initializer
 
 
 def _init_bvcbm_worker(T: int, start_volume: float, page: int) -> None:
@@ -21,39 +27,41 @@ def _init_bvcbm_worker(T: int, start_volume: float, page: int) -> None:
 
 
 def simulate_worker(theta: np.ndarray, seed: int) -> np.ndarray:
-    if _SIM_FN is None:  # guard: should not be called in main process
+    fn = _SIM_FN
+    if fn is None:  # guard: should not be called in main process
         raise RuntimeError("_SIM_FN not initialised in worker")
-    return np.asarray(_SIM_FN(np.asarray(theta, float), int(seed)), dtype=np.float32)
+    return np.asarray(fn(np.asarray(theta, float), int(seed)), dtype=np.float32)
 
 
 # ---------------- Simulators (host) ----------------
-def simulator_monophasic(
-    T: int, start_volume: float = 50.0, page: int = 5
-) -> Callable[[Iterable[float], int], np.ndarray]:
+def simulator_monophasic(T: int, start_volume: float = 50.0, page: int = 5) -> SimFn:
     """theta = (p0, psc, dmax, gage). Returns daily tumour volumes of length T."""
 
     def f(theta: Iterable[float], seed: int) -> np.ndarray:
         p0, psc, dmax, gage = [float(x) for x in theta]
-        return tm.simulate(
+        result = tm.simulate(
             [p0, psc, int(round(dmax)), int(round(gage)), int(page)],
             T=T,
             seed=int(seed),
             start_volume=float(start_volume),
         )
+        return np.asarray(result, dtype=np.float32)
 
     return f
 
 
-def simulator_biphasic(
-    T: int, start_volume: float = 50.0, page: int = 5
-) -> Callable[[Iterable[float], int], np.ndarray]:
+def simulator_biphasic(T: int, start_volume: float = 50.0, page: int = 5) -> SimFn:
     """theta = (p0_1, psc_1, dmax_1, gage_1, p0_2, psc_2, dmax_2, gage_2, tau)."""
     if not hasattr(tm, "simulate_biphasic"):
-        raise RuntimeError("tumourmodel.simulate_biphasic missing; add binding in tumourmodel-py")
+        raise RuntimeError(
+            "tumourmodel.simulate_biphasic missing; add binding in tumourmodel-py"
+        )
 
     def f(theta: Iterable[float], seed: int) -> np.ndarray:
-        p0_1, psc_1, dmax_1, gage_1, p0_2, psc_2, dmax_2, gage_2, tau = [float(x) for x in theta]
-        return tm.simulate_biphasic(
+        p0_1, psc_1, dmax_1, gage_1, p0_2, psc_2, dmax_2, gage_2, tau = [
+            float(x) for x in theta
+        ]
+        result = tm.simulate_biphasic(
             [p0_1, psc_1, int(round(dmax_1)), int(round(gage_1)), int(page)],
             [p0_2, psc_2, int(round(dmax_2)), int(round(gage_2)), int(page)],
             int(round(tau)),
@@ -61,6 +69,7 @@ def simulator_biphasic(
             seed=int(seed),
             start_volume=float(start_volume),
         )
+        return np.asarray(result)
 
     return f
 
@@ -125,7 +134,9 @@ def simulate(
 ) -> jax.Array:
     """Monophasic adaptor (kept for completeness)."""
     fn = simulator_monophasic(T=T, start_volume=start_volume, page=page)
-    seed = int(jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32)))
+    seed = int(
+        jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32))
+    )
     return jnp.asarray(fn(theta, seed), dtype=jnp.float32)
 
 
@@ -139,7 +150,9 @@ def simulate_biphasic(
 ) -> jax.Array:
     """Biphasic adaptor used by pipeline simulate_path. Not for use under jit/vmap."""
     fn = simulator_biphasic(T=T, start_volume=start_volume, page=page)
-    seed = int(jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32)))
+    seed = int(
+        jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32))
+    )
     return jnp.asarray(fn(theta, seed), dtype=jnp.float32)
 
 
