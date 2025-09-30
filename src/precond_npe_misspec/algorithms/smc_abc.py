@@ -68,14 +68,18 @@ def run_smc_abc(
     def simulate_x_fn(k: Array, th: Array) -> Array:
         if B_sim > 1:
             keys = jax.random.split(k, B_sim)
-            return jax.vmap(lambda kk: spec.simulate(kk, th, **sim_kwargs))(keys)  # (B, …)
+            return jax.vmap(lambda kk: spec.simulate(kk, th, **sim_kwargs))(
+                keys
+            )  # (B, …)
         return cast(Array, spec.simulate(k, th, **sim_kwargs))  # (…,)
 
     # batched summaries
     def summary_fn(x: Array) -> Array:
         # For B_sim==1: x is a single trajectory array (e.g., (T,K)); do NOT vmap.
         # For B_sim>1 : x is (B, …); vmap over the leading batch only.
-        return jax.vmap(spec.summaries, in_axes=0)(x) if B_sim > 1 else spec.summaries(x)
+        return (
+            jax.vmap(spec.summaries, in_axes=0)(x) if B_sim > 1 else spec.summaries(x)
+        )
 
     # distance on summaries
     rho = _build_distance(
@@ -129,12 +133,24 @@ def run_smc_abc(
 
     # iterate
     t, key_loop = 0, key
+    MIN_ITERS = 2
+    eps_hist, acc_hist = [], []
+
     while t < max_iters:
         key_loop, k = jax.random.split(key_loop)
         state, info = _core(k, state, int(state.R))
         t += 1
-        print("state.epsilon:", state.epsilon)
-        if default_stopping(state, info, eps_min=eps_min, acc_min=acc_min):
+        eps_hist.append(float(state.epsilon))
+        acc_hist.append(float(info.acceptance_rate))
+        print(
+            f"[smc] t={t} eps={state.epsilon:.6g} acc={info.acceptance_rate:.3f} R={int(state.R)}"
+        )
+
+        # print("state.epsilon:", state.epsilon)
+        # print("info.acceptance_rate:", info.acceptance_rate)
+        if (t >= MIN_ITERS) and default_stopping(
+            state, info, eps_min=eps_min, acc_min=acc_min
+        ):
             break
 
     # directly return cached simulations and summaries

@@ -47,8 +47,8 @@ wheels = [
 
 [[package]]
 name = "blackjax"
-version = "0.1.dev544+g33ccbd813"
-source = { git = "https://github.com/RyanJafefKelly/blackjax?branch=smc_abc#33ccbd813c167bd0f237a0fd86ae0ad639aed6a5" }
+version = "0.1.dev545+g0fd45955c"
+source = { git = "https://github.com/RyanJafefKelly/blackjax?branch=smc_abc#0fd45955cc3fd86f7efe6e7163ff776d334b1850" }
 dependencies = [
     { name = "fastprogress" },
     { name = "jax" },

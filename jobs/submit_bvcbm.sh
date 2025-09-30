@@ -11,6 +11,8 @@ for m in "${METHODS[@]}"; do
     "METHODS_STR=${m}"
     "R=1"
     "SMC_N_PARTICLES=2000"
+    "SMC_INITIAL_R=4"
+    "SMC_ALPHA=0.4"
     "T=32"
     "START_VOLUME=50.0"
     "PAGE=5"
