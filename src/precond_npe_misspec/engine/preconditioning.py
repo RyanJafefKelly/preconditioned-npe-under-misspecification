@@ -7,9 +7,12 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from jax import random
+import numpy as np
 
 from precond_npe_misspec.algorithms.smc_abc import run_smc_abc
 from precond_npe_misspec.utils import distances as dist
+from precond_npe_misspec.algorithms.abc_rf import abc_rf_select
 
 type Array = jax.Array
 DistanceFn = Callable[[Array, Array], Array]
@@ -31,8 +34,12 @@ def _make_dataset(
     *,
     batch_size: int | None = None,
     sim_kwargs: dict[str, Any] | None = None,
-) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    """Generate (theta, S, x) batches from the prior."""
+    store_raw_data: bool = True,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray | None]:
+    """Generate (theta, S, x) batches from the prior.
+
+    Set ``store_raw_data=False`` to skip retaining the raw simulator outputs ``x``.
+    """
     if batch_size is None:
         batch_size = max(1, min(n, 2048))
     sim_kwargs = {} if sim_kwargs is None else sim_kwargs
@@ -42,11 +49,14 @@ def _make_dataset(
     @eqx.filter_jit  # compile two shapes at most (full and last partial)
     def _simulate_batch(th_keys: Array, sm_keys: Array) -> tuple[Array, Array, Array]:
         thetas_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, thetas_b)  # (B, n_obs)
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+            sm_keys, thetas_b
+        )  # (B, n_obs)
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
         return thetas_b, S_b, xs_b
 
-    th_parts, S_parts, x_parts = [], [], []
+    th_parts, S_parts = [], []
+    x_parts: list[Array] | None = [] if store_raw_data else None
     for start in range(0, n, batch_size):
         end = min(start + batch_size, n)
         idx = jnp.arange(start, end, dtype=jnp.uint32)
@@ -55,11 +65,12 @@ def _make_dataset(
         th_b, S_b, x_b = _simulate_batch(th_keys, sm_keys)
         th_parts.append(th_b)
         S_parts.append(S_b)
-        x_parts.append(x_b)
+        if x_parts is not None:
+            x_parts.append(x_b)
 
     thetas = jnp.concatenate(th_parts, axis=0)
     S = jnp.concatenate(S_parts, axis=0)
-    xs = jnp.concatenate(x_parts, axis=0)
+    xs = jnp.concatenate(x_parts, axis=0) if x_parts is not None else None
 
     mask_theta = jnp.all(jnp.isfinite(thetas), axis=1)
     mask_S = jnp.all(jnp.isfinite(S), axis=1)
@@ -70,9 +81,10 @@ def _make_dataset(
 
     thetas = thetas[mask]
     S = S[mask]
-    xs = xs[mask]
+    if xs is not None:
+        xs = xs[mask]
 
-    print(f"jnp.max(S)={jnp.max(S)}, jnp.min(thetas)={jnp.min(S)}")
+    print(f"jnp.max(S)={jnp.max(S)}, jnp.min(S)={jnp.min(S)}")
     print(f"Is nan: {jnp.sum(jnp.isnan(thetas))}")
 
     return thetas, S, xs
@@ -105,7 +117,9 @@ def _abc_rejection_with_sim(
         th_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
 
         sm_keys = jax.vmap(lambda i: jax.random.fold_in(k_sm_base, i))(idx)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, th_b)
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+            sm_keys, th_b
+        )
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
 
         d_b = _to_vec(dist_fn(S_b, s_obs))  # (B,)
@@ -127,7 +141,11 @@ def _abc_rejection_with_sim(
     n_tot = int(d_all.shape[0])
 
     # Keep exactly n_keep: q in (0,1] => fraction; q>=1 => absolute count.
-    n_keep = max(1, min(n_tot, int(jnp.ceil(q * n_tot)))) if 0 < q <= 1.0 else max(1, min(n_tot, int(q)))
+    n_keep = (
+        max(1, min(n_tot, int(jnp.ceil(q * n_tot))))
+        if 0 < q <= 1.0
+        else max(1, min(n_tot, int(q)))
+    )
 
     idx = jnp.argpartition(d_all, n_keep - 1)[:n_keep]
     idx = idx[jnp.argsort(d_all[idx])]
@@ -143,16 +161,24 @@ def run_preconditioning(
     s_obs: jnp.ndarray,
     run: Any,
     flow_cfg: Any,  # unused here, kept for a stable call signature
-) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray | None]:
     """
     Return training triples (theta_train, S_train, X_train) according to:
       - method="none"       → prior draws
       - method="rejection"  → rejection ABC
       - method="smc_abc"    → SMC‑ABC
+
+    ``X_train`` may be ``None`` when ``run.precond.store_raw_data`` is ``False`` and
+    the downstream posterior does not require raw simulations.
     """
-    sim_kwargs = {} if getattr(run, "sim_kwargs", None) is None else dict(run.sim_kwargs)
+    sim_kwargs = (
+        {} if getattr(run, "sim_kwargs", None) is None else dict(run.sim_kwargs)
+    )
     batch_size = int(getattr(run, "batch_size", 512))
     method = run.precond.method
+    store_raw_requested = bool(getattr(run.precond, "store_raw_data", True))
+    posterior_method = getattr(run.posterior, "method", None)
+    needs_raw_global = posterior_method == "npe_rs"
 
     # Optional pilot set for distance factory
     S_pilot: jnp.ndarray | None = None
@@ -167,16 +193,23 @@ def run_preconditioning(
             run.precond.n_sims,
             batch_size=batch_size,
             sim_kwargs=sim_kwargs,
+            store_raw_data=False,
         )
 
     if method == "none":
         key, k_data = jax.random.split(key)
+        if needs_raw_global and not store_raw_requested:
+            print(
+                "Preconditioning: overriding store_raw_data=True for NPE-RS posterior"
+            )
+        store_raw = store_raw_requested or needs_raw_global
         theta_train, S_train, x_train = _make_dataset(
             spec,
             k_data,
             run.precond.n_sims,
             batch_size=batch_size,
             sim_kwargs=sim_kwargs,
+            store_raw_data=store_raw,
         )
         theta_train = theta_train.astype(jnp.float32)
         S_train = S_train.astype(jnp.float32)
@@ -201,6 +234,8 @@ def run_preconditioning(
             batch_size=batch_size,
             sim_kwargs=sim_kwargs,
         )
+        if not (store_raw_requested or needs_raw_global):
+            X = None
         return (
             th.astype(jnp.float32),
             S.astype(jnp.float32),
@@ -228,6 +263,149 @@ def run_preconditioning(
         theta_particles = theta_particles.astype(jnp.float32)
         S_particles = S_particles.astype(jnp.float32)
         print(f"Preconditioning: smc_abc | particles: {int(theta_particles.shape[0])}")
+        if not (store_raw_requested or needs_raw_global):
+            x_particles = None
         return theta_particles, S_particles, x_particles
 
+    if method == "rf_abc":
+        key, k_data = jax.random.split(key)
+        print("batch_size", batch_size)
+        store_raw = store_raw_requested or needs_raw_global
+        theta_all, S_all, X_all = _make_dataset(
+            spec,
+            k_data,
+            run.precond.n_sims,
+            batch_size=batch_size,
+            sim_kwargs=sim_kwargs,
+            store_raw_data=store_raw,
+        )
+        print("made dataset")
+        # Train forests and get weights
+        theta_all, S_all, X_all, diag = abc_rf_select(
+            S=S_all, theta=theta_all, X=X_all, s_obs=s_obs, cfg=run.precond
+        )
+
+        w = np.asarray(diag["weights"], dtype=np.float64)
+        w /= w.sum() + 1e-12
+
+        # sample indices WITH replacement (importance resampling)
+        keep = (
+            int(np.ceil(run.precond.q_precond * w.size))
+            if 0 < run.precond.q_precond <= 1.0
+            else int(min(w.size, run.precond.q_precond))
+        )
+        rng_np = np.random.default_rng(run.precond.rf_random_state)
+        # NOTE: gone with False here ... priority is just to get a decent set for training
+        # not posterior approximation.
+        idx = rng_np.choice(w.size, size=keep, replace=True, p=w)
+
+        # # gather selected triples
+        theta_sel = theta_all[idx]
+        S_sel = S_all[idx]
+        X_sel = X_all[idx] if X_all is not None else None  # unused by RNPE
+
+        # # --- jitter AFTER selection ---
+        key, k_th, k_s = jax.random.split(key, 3)
+
+        # theta jitter: prefer prior-range scale; else sample std
+        th_lo = getattr(spec, "theta_lo", None)
+        th_hi = getattr(spec, "theta_hi", None)
+        if th_lo is not None and th_hi is not None:
+            th_scale = 0.02 * (jnp.asarray(th_hi) - jnp.asarray(th_lo))
+        else:
+            th_scale = 0.02 * (jnp.std(theta_sel, axis=0) + 1e-8)
+
+        theta_sel = (
+            theta_sel
+            + jax.random.normal(k_th, theta_sel.shape, dtype=theta_sel.dtype) * th_scale
+        )
+        if th_lo is not None and th_hi is not None:
+            theta_sel = jnp.clip(theta_sel, jnp.asarray(th_lo), jnp.asarray(th_hi))
+
+        # S jitter: cap scale to avoid runaway summaries
+        s_std = jnp.std(S_sel, axis=0)
+        s_scale = 0.02 * jnp.minimum(s_std, jnp.ones_like(s_std))
+        S_sel = S_sel + jax.random.normal(k_s, S_sel.shape, dtype=S_sel.dtype) * s_scale
+
+        ESS = float(1.0 / (w**2).sum())
+        uniq = int(np.unique(idx).size)
+        print(
+            f"Preconditioning: abc_rf | kept={keep}/{w.size} | OOB R^2={diag['oob_r2']:.3f} | ESS={ESS:.1f} | unique={uniq}"
+        )
+
+        return theta_sel.astype(jnp.float32), S_sel.astype(jnp.float32), X_sel
     raise ValueError(f"Unknown preconditioning method: {method!r}")
+
+
+#     # keep size
+#     keep = (
+#         int(np.ceil(run.precond.q_precond * w.size))
+#         if 0 < run.precond.q_precond <= 1.0
+#         else int(min(w.size, run.precond.q_precond))
+#     )
+
+#     rng_np = np.random.default_rng(run.precond.rf_random_state)
+
+#     def residual_counts(
+#         rng: np.random.Generator, w: np.ndarray, K: int
+#     ) -> np.ndarray:
+#         m = np.floor(K * w).astype(int)  # deterministic part
+#         r = int(K - m.sum())
+#         if r > 0:
+#             rem = K * w - m
+#             rem = rem / (rem.sum() + 1e-12)
+#             add = rng.choice(w.size, size=r, replace=False, p=rem)
+#             m[add] += 1
+#         return m  # length N, sum K
+
+#     def systematic_from_counts(cnt: np.ndarray) -> np.ndarray:
+#         # expand to explicit indices (size K)
+#         idx = np.repeat(np.arange(cnt.size, dtype=np.int64), cnt)
+#         # stable shuffle to break blocks
+#         return rng_np.permutation(idx)
+
+#     cnt = residual_counts(rng_np, w, keep)  # integer multiplicities, sum=keep
+#     idx = systematic_from_counts(cnt)  # shape (keep,)
+
+#     # Diagnostics
+#     ESS = float(1.0 / (w**2).sum())
+#     uniq = int(np.count_nonzero(cnt))
+#     print(
+#         f"Preconditioning: abc_rf | kept={keep}/{w.size} | OOB R^2={diag['oob_r2']:.3f} | ESS={ESS:.1f} | unique={uniq}"
+#     )
+
+#     # Re-simulate fresh (X,S) for selected thetas to avoid identical triples
+#     theta_sel = theta_all[idx]  # (keep, θ_dim)
+
+#     key, k_resim = jax.random.split(key)
+#     keys = jax.random.split(k_resim, theta_sel.shape[0])
+#     X_new = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+#         keys, theta_sel
+#     )
+#     S_new = jax.vmap(spec.summaries)(X_new)
+
+#     return theta_sel.astype(jnp.float32), S_new.astype(jnp.float32), X_new
+# raise ValueError(f"Unknown preconditioning method: {method!r}")
+
+
+# jit data
+#     key, k_rng = jax.random.split(key)
+#     theta_all = theta_all + random.normal(k_rng, theta_all.shape) * 1e-6
+#     S_all = S_all + random.normal(k_rng, S_all.shape) * 1e-6
+
+#     w = np.asarray(diag["weights"], dtype=np.float64)
+#     keep = (
+#         int(np.ceil(run.precond.q_precond * w.size))
+#         if 0 < run.precond.q_precond <= 1.0
+#         else int(min(w.size, run.precond.q_precond))
+#     )
+#     rng_np = np.random.default_rng(run.precond.rf_random_state)
+#     idx = rng_np.choice(w.size, size=keep, replace=True, p=w / (w.sum() + 1e-12))
+#     print(
+#         f"Preconditioning: abc_rf | kept={keep}/{w.size} | OOB R^2={diag['oob_r2']:.3f}"
+#     )
+#     return (
+#         theta_all[idx].astype(jnp.float32),
+#         S_all[idx].astype(jnp.float32),
+#         X_all[idx],
+#     )
