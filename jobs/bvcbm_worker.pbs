@@ -38,7 +38,7 @@ uv sync --no-dev --frozen --python 3.13
 
 # Inputs
 R=${R:-1}
-METHODS_STR=${METHODS_STR:-"pnpe prnpe rnpe"}   # add 'npe' if desired
+METHODS_STR=${METHODS_STR:-"npe pnpe prnpe rnpe rf_abc_npe rf_abc_rnpe"}
 OBS_SEED_OFFSET=${OBS_SEED_OFFSET:-1234}
 
 # BVCBM defaults
@@ -51,7 +51,7 @@ export OBS_MODEL="${OBS_MODEL:-real}"
 # SMC‑ABC defaults
 export SMC_N_PARTICLES="${SMC_N_PARTICLES:-2000}"
 export SMC_ALPHA="${SMC_ALPHA:-0.5}"
-export SMC_EPSILON0="${SMC_EPSILON0:-1e6}"
+export SMC_EPSILON0="${SMC_EPSILON0:-1e7}"
 export SMC_EPS_MIN="${SMC_EPS_MIN:-1e-3}"
 export SMC_ACC_MIN="${SMC_ACC_MIN:-0.10}"
 export SMC_MAX_ITERS="${SMC_MAX_ITERS:-4}"
@@ -79,7 +79,7 @@ echo "[env] host=$(hostname) jobid=${PBS_JOBID} idx=${IDX} method=${METHOD} rep=
 mkdir -p logs/bvcbm results/_done
 
 case "$METHOD" in
-  npe|pnpe|prnpe|rnpe) bash "experiments/bvcbm/run_${METHOD}.sh" 2>&1 | tee "logs/bvcbm/${METHOD}_rep${RID}.log" ;;
+  npe|pnpe|prnpe|rnpe|rf_abc_npe|rf_abc_rnpe) bash "experiments/bvcbm/run_${METHOD}.sh" 2>&1 | tee "logs/bvcbm/${METHOD}_rep${RID}.log" ;;
   *) echo "Unknown method: $METHOD" >&2; exit 3 ;;
 esac
 

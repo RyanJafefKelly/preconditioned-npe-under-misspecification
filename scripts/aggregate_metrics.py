@@ -30,7 +30,8 @@ class Args:
 
 # ---------- Utilities ----------
 
-_METHODS_ORDER = ("npe", "pnpe", "rnpe", "prnpe", "npe_rs", "pnpe_rs")
+# _METHODS_ORDER = ("npe", "pnpe", "rnpe", "prnpe", "npe_rs", "pnpe_rs")
+_METHODS_ORDER = ("npe", "pnpe", "rnpe", "prnpe", "rf_abc_npe", "rf_abc_rnpe")
 _TS_PAT = re.compile(r"^\d{8}-\d{6}$")
 
 

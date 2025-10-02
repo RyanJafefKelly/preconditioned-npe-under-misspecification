@@ -2,7 +2,7 @@
 set -euo pipefail
 
 R=${R:-100}
-METHODS_STR=${METHODS_STR:-"npe rnpe pnpe prnpe npe_rs pnpe_rs"}        # local use only
+METHODS_STR=${METHODS_STR:-"npe rnpe pnpe prnpe rf_abc_npe rf_abc_rnpe"}        # local use only
 MEM_GB=${MEM_GB:-12}
 NCPUS=${NCPUS:-1}
 WALLTIME=${WALLTIME:-"02:00:00"}
