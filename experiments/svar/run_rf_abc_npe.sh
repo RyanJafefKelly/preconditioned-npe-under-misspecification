@@ -43,8 +43,8 @@ RF_TAG="mode_${ABC_RF_MODE}-nest_${RF_N_ESTIMATORS}-leaf_${RF_MIN_LEAF}"
 [[ -n "${RF_MAX_DEPTH}" ]] && RF_TAG="${RF_TAG}-depth_${RF_MAX_DEPTH}"
 [[ "${RF_TRAIN_FRAC}" != "1.0" ]] && RF_TAG="${RF_TAG}-tfrac_${RF_TRAIN_FRAC}"
 
-GROUP="th_${THETA_TAG}-K_${K}-T_${T}-obs_${OBS_MODEL}-n_sims_${N_SIMS}-q_${Q_PRECOND}-rfabc_${RF_TAG}"
-OUTDIR="results/svar/pnpe/${GROUP}/seed-${SEED}/${DATE}"; mkdir -p "$OUTDIR"
+GROUP="th_${THETA_TAG}-K_${K}-T_${T}-obs_${OBS_MODEL}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
+OUTDIR="results/svar/rf_abc_npe/${GROUP}/seed-${SEED}/${DATE}"; mkdir -p "$OUTDIR"
 
 cmd=(uv run python -m precond_npe_misspec.pipelines.svar
   --seed "$SEED" --obs_seed "$((10#$SEED + 1234))" --outdir "$OUTDIR"

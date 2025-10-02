@@ -46,8 +46,8 @@ RF_TAG="mode_${ABC_RF_MODE}-nest_${RF_N_ESTIMATORS}-leaf_${RF_MIN_LEAF}"
 [[ -n "${RF_MAX_DEPTH}" ]] && RF_TAG="${RF_TAG}-depth_${RF_MAX_DEPTH}"
 [[ "${RF_TRAIN_FRAC}" != "1.0" ]] && RF_TAG="${RF_TAG}-tfrac_${RF_TRAIN_FRAC}"
 
-GROUP="th_$(printf 'k%s_lam%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-obs_${OBS_MODEL}-eps_${EPS}-alpha_${ALPHA}-n_sims_${N_SIMS}-q_${Q_PRECOND}-rfabc_${RF_TAG}"
-OUTDIR="results/contaminated_weibull/pnpe/${GROUP}/seed-${SEED}/${DATE}"
+GROUP="th_$(printf 'k%s_lam%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-obs_${OBS_MODEL}-eps_${EPS}-alpha_${ALPHA}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
+OUTDIR="results/contaminated_weibull/rf_abc_npe/${GROUP}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
 
 cmd=(uv run python -m precond_npe_misspec.pipelines.contaminated_weibull
