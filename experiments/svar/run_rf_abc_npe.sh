@@ -13,51 +13,67 @@ THETA_DEFAULT="0.579 -0.143 0.836 0.745 -0.660 -0.254 0.1"
 THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 (( ${#THETA_ARR[@]} == 7 )) || { echo "need 7 values for THETA"; exit 1; }
 
-# Preconditioning
-: "${N_SIMS:=8000}"; : "${Q_PRECOND:=0.2}"; : "${PRECOND_METHOD:=smc_abc}"
-: "${SMC_N_PARTICLES:=8000}"; : "${SMC_ALPHA:=0.5}"; : "${SMC_EPSILON0:=1e6}"
-: "${SMC_EPS_MIN:=1e-3}"; : "${SMC_ACC_MIN:=0.10}"; : "${SMC_MAX_ITERS:=3}"
-: "${SMC_INITIAL_R:=1}"; : "${SMC_C_TUNING:=0.01}"; : "${SMC_B_SIM:=1}"
+# ---------------------------
+# Preconditioning: RF-ABC
+# ---------------------------
+: "${N_SIMS:=20000}"
+: "${Q_PRECOND:=0.1}"
+: "${PRECOND_METHOD:=rf_abc}"     # rf_abc|rejection|smc_abc|none
 
-OUTDIR="results/svar/pnpe_rs/th_$(printf 'p1%s_p2%s_p3%s_p4%s_p5%s_p6%s_s%s' "${THETA_ARR[@]}")-K_${K}-T_${T}-obs_${OBS_MODEL}-n_sims_${N_SIMS}-q_${Q_PRECOND}/seed-${SEED}/${DATE}"
-mkdir -p "$OUTDIR"
+# RF-ABC knobs
+: "${ABC_RF_MODE:=multi}"         # multi|per_param
+: "${RF_N_ESTIMATORS:=800}"
+: "${RF_MIN_LEAF:=25}"
+: "${RF_MAX_DEPTH:=12}"             # empty => None (use default)
+: "${RF_TRAIN_FRAC:=1.0}"
+: "${RF_RANDOM_STATE:=$SEED}"
+: "${RF_N_JOBS:=-1}"
 
-# Posterior draws
+# ---------------------------
+# Posterior: NPE
+# ---------------------------
 : "${N_POSTERIOR_DRAWS:=20000}"
-
-# Flow hyperparameters
 : "${FLOW_LAYERS:=8}"; : "${NN_WIDTH:=128}"; : "${KNOTS:=10}"; : "${INTERVAL:=8.0}"
 : "${LEARNING_RATE:=5e-4}"; : "${MAX_EPOCHS:=500}"; : "${MAX_PATIENCE:=10}"; : "${BATCH_SIZE:=512}"
 
-# NPE‑RS (embedding + MMD)
-: "${EMBED_DIM:=8}"
-: "${EMBED_WIDTH:=128}"
-: "${EMBED_DEPTH:=1}"
-: "${MMD_WEIGHT:=0.01}"
-: "${MMD_SUBSAMPLE:=256}"
-: "${BANDWIDTH:=median}"
-: "${KERNEL:=rbf}"
-: "${WARMUP_EPOCHS:=0}"
+th_parts=(); for i in "${!THETA_ARR[@]}"; do th_parts+=("p$((i+1))${THETA_ARR[$i]}"); done
+THETA_TAG=$(IFS=_; echo "${th_parts[*]}")
+
+RF_TAG="mode_${ABC_RF_MODE}-nest_${RF_N_ESTIMATORS}-leaf_${RF_MIN_LEAF}"
+[[ -n "${RF_MAX_DEPTH}" ]] && RF_TAG="${RF_TAG}-depth_${RF_MAX_DEPTH}"
+[[ "${RF_TRAIN_FRAC}" != "1.0" ]] && RF_TAG="${RF_TAG}-tfrac_${RF_TRAIN_FRAC}"
+
+GROUP="th_${THETA_TAG}-K_${K}-T_${T}-obs_${OBS_MODEL}-n_sims_${N_SIMS}-q_${Q_PRECOND}-rfabc_${RF_TAG}"
+OUTDIR="results/svar/pnpe/${GROUP}/seed-${SEED}/${DATE}"; mkdir -p "$OUTDIR"
 
 cmd=(uv run python -m precond_npe_misspec.pipelines.svar
   --seed "$SEED" --obs_seed "$((10#$SEED + 1234))" --outdir "$OUTDIR"
   --theta_true "${THETA_ARR[@]}" --k "$K" --T "$T" --obs_model "$OBS_MODEL"
+
+  # Preconditioning config
   --precond.method "$PRECOND_METHOD" --precond.n_sims "$N_SIMS" --precond.q_precond "$Q_PRECOND"
-  --precond.smc_n_particles "$SMC_N_PARTICLES" --precond.smc_alpha "$SMC_ALPHA" --precond.smc_epsilon0 "$SMC_EPSILON0"
-  --precond.smc_eps_min "$SMC_EPS_MIN" --precond.smc_acc_min "$SMC_ACC_MIN" --precond.smc_max_iters "$SMC_MAX_ITERS"
-  --precond.smc_initial_R "$SMC_INITIAL_R" --precond.smc_c_tuning "$SMC_C_TUNING" --precond.smc_B_sim "$SMC_B_SIM"
-  --posterior.method "npe_rs" --posterior.n_posterior_draws "$N_POSTERIOR_DRAWS"
-  --npers.embed_dim "$EMBED_DIM" --npers.embed_width "$EMBED_WIDTH" --npers.embed_depth "$EMBED_DEPTH"
-  --npers.mmd_weight "$MMD_WEIGHT" --npers.mmd_subsample "$MMD_SUBSAMPLE"
-  --npers.bandwidth "$BANDWIDTH" --npers.kernel "$KERNEL" --npers.warmup_epochs "$WARMUP_EPOCHS"
+  --precond.abc_rf_mode "$ABC_RF_MODE" --precond.rf_n_estimators "$RF_N_ESTIMATORS"
+  --precond.rf_min_leaf "$RF_MIN_LEAF" --precond.rf_train_frac "$RF_TRAIN_FRAC"
+  --precond.rf_random_state "$RF_RANDOM_STATE" --precond.rf_n_jobs "$RF_N_JOBS"
+
+  # Posterior = NPE
+  --posterior.method "npe" --posterior.n_posterior_draws "$N_POSTERIOR_DRAWS"
+
+  # Flow
   --flow.flow_layers "$FLOW_LAYERS" --flow.nn_width "$NN_WIDTH" --flow.knots "$KNOTS" --flow.interval "$INTERVAL"
   --flow.learning_rate "$LEARNING_RATE" --flow.max_epochs "$MAX_EPOCHS" --flow.max_patience "$MAX_PATIENCE" --flow.batch_size "$BATCH_SIZE"
 )
+
+# Optional RF max depth
+if [[ -n "${RF_MAX_DEPTH}" ]]; then
+  cmd+=(--precond.rf_max_depth "$RF_MAX_DEPTH")
+fi
 
 printf '%q ' "${cmd[@]}" | tee "${OUTDIR}/cmd.txt"; echo
 env | sort > "${OUTDIR}/env.txt"
 "${cmd[@]}" 2>&1 | tee "${OUTDIR}/stdout.log"
 
+# Metrics
 THETA_TARGET_DEFAULT="0.579 -0.143 0.836 0.745 -0.660 -0.254 0.1"
 THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"; THETA_TARGET="${THETA_TARGET//,/}"; read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET"
 
@@ -65,6 +81,6 @@ uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
   --outdir "$OUTDIR" \
   --theta-target "${THETA_TARGET_ARR[@]}" \
   --level 0.95 --want-hpdi --want-central \
-  --method PNPE_RS \
+  --method PNPE \
   --compute-ppd --ppd-entrypoints "$OUTDIR/entrypoints.json" \
   --ppd-n 1000 --ppd-metric l2

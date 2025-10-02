@@ -20,7 +20,7 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 (( ${#THETA_ARR[@]} == 3 )) || { echo "need 3 values for THETA"; exit 1; }
 
 # Simulation budget for training pairs (prior predictive)
-: "${N_SIMS:=3000}"
+: "${N_SIMS:=4000}"
 
 # Posterior draws
 : "${N_POSTERIOR_DRAWS:=20000}"

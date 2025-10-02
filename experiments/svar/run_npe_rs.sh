@@ -15,7 +15,7 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 (( ${#THETA_ARR[@]} == 7 )) || { echo "need 7 values for THETA"; exit 1; }
 
 # Training set size (no preconditioning)
-: "${N_SIMS:=20000}"
+: "${N_SIMS:=8000}"
 
 OUTDIR="results/svar/npe_rs/th_$(printf 'p1%s_p2%s_p3%s_p4%s_p5%s_p6%s_s%s' "${THETA_ARR[@]}")-K_${K}-T_${T}-obs_${OBS_MODEL}-n_sims_${N_SIMS}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"

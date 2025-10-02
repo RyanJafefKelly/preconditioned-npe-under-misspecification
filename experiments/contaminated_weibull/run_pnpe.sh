@@ -3,7 +3,7 @@ set -euo pipefail
 export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 
 DATE=$(date +"%Y%m%d-%H%M%S")
-: "${SEED:=0}"
+: "${SEED:=1}"
 
 # CW specifics
 : "${N_OBS:=200}"

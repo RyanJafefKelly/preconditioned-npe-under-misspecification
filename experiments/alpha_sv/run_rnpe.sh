@@ -26,7 +26,7 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 : "${LAPLACE_ALPHA:=0.3}"; : "${LAPLACE_MIN_SCALE:=0.01}"
 : "${STUDENT_T_SCALE:=0.05}"; : "${STUDENT_T_DF:=1.0}"
 : "${CAUCHY_SCALE:=0.05}"; : "${SPIKE_STD:=0.01}"; : "${SLAB_SCALE:=0.25}"
-: "${MISSPECIFIED_PROB:=0.5}"; : "${LEARN_PROB:=0}"
+: "${MISSPECIFIED_PROB:=0.5}"; : "${LEARN_PROB:=1}"
 
 th_parts=(); for i in "${!THETA_ARR[@]}"; do th_parts+=("p$((i+1))${THETA_ARR[$i]}"); done
 THETA_TAG=$(IFS=_; echo "${th_parts[*]}")

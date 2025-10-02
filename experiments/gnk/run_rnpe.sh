@@ -47,7 +47,7 @@ mkdir -p "$OUTDIR"
 : "${SPIKE_STD:=0.01}"
 : "${SLAB_SCALE:=0.25}"
 : "${MISSPECIFIED_PROB:=0.5}"
-: "${LEARN_PROB:=0}"                   # 1 to infer rho
+: "${LEARN_PROB:=1}"                   # 1 to infer rho
 : "${MCMC_WARMUP:=1000}"
 : "${MCMC_SAMPLES:=2000}"
 : "${MCMC_THIN:=1}"
@@ -88,6 +88,7 @@ cmd=(uv run python -m precond_npe_misspec.pipelines.gnk
   --flow.max_patience "$MAX_PATIENCE"
   --flow.batch_size "$BATCH_SIZE"
 )
+if [[ "${LEARN_PROB}" == "1" ]]; then cmd+=(--robust.learn_prob); fi
 
 printf '%q ' "${cmd[@]}" | tee "${OUTDIR}/cmd.txt"
 echo
