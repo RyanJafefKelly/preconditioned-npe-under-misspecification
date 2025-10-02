@@ -9,13 +9,21 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from precond_npe_misspec.engine.run import (NpeRsConfig, PosteriorConfig,
-                                            PrecondConfig, RobustConfig,
-                                            RunConfig, run_experiment)
+from precond_npe_misspec.engine.run import (
+    NpeRsConfig,
+    PosteriorConfig,
+    PrecondConfig,
+    RobustConfig,
+    RunConfig,
+    run_experiment,
+)
 from precond_npe_misspec.examples import contaminated_weibull as cw
 from precond_npe_misspec.examples.embeddings import build as get_embedder
 from precond_npe_misspec.pipelines.base_pnpe import (
-    ExperimentSpec, FlowConfig, default_posterior_flow_builder)
+    ExperimentSpec,
+    FlowConfig,
+    default_posterior_flow_builder,
+)
 
 type Array = jax.Array
 
@@ -83,7 +91,7 @@ class Config:
     alpha: float = 40.0
 
     # Engines
-    precond: PrecondConfig = PrecondConfig(method="smc_abc", n_sims=10000)
+    precond: PrecondConfig = PrecondConfig(method="rf_abc")
     # precond: PrecondConfig = PrecondConfig(
     #     method="rejection", q_precond=0.10, n_sims=200_000
     # )
@@ -93,9 +101,9 @@ class Config:
     npers: NpeRsConfig = NpeRsConfig()
     # Prior hyperparameters (log‑normal on k and λ)
     logk_mu: float = -0.4
-    logk_sigma: float = 0.7
-    loglam_mu: float = 0.7
-    loglam_sigma: float = 0.7
+    logk_sigma: float = 1.2
+    loglam_mu: float = -0.4
+    loglam_sigma: float = 1.2
 
 
 def _prior_sample_factory(cfg: Config) -> Callable[[jax.Array], jnp.ndarray]:
@@ -172,7 +180,7 @@ def simulate(
     *,
     n_obs: int,
     obs_model: Literal["assumed", "true"] = "assumed",
-    eps: float = 0.05,
+    eps: float = 0.00,
     alpha: float = 40.0,
 ) -> Array:
     if obs_model == "assumed":
