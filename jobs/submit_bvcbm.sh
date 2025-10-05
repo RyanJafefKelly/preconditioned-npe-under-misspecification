@@ -2,7 +2,7 @@
 # Submit one job per method (no reps).
 set -euo pipefail
 
-METHODS=(${METHODS:-npe pnpe prnpe rnpe})
+METHODS=(${METHODS:-npe pnpe prnpe rnpe rf_abc_npe rf_abc_rnpe})
 EXTRA_QSUB_ARGS=("$@")   # e.g., -l ncpus=32 -l mem=96GB
 
 for m in "${METHODS[@]}"; do
