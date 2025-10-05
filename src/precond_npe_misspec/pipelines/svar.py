@@ -16,8 +16,11 @@ from precond_npe_misspec.engine.run import (
     RunConfig,
     run_experiment,
 )
-from precond_npe_misspec.engine.spec import ExperimentSpec, FlowConfig, default_posterior_flow_builder
-from precond_npe_misspec.examples.embeddings import build as get_embedder
+from precond_npe_misspec.engine.spec import (
+    ExperimentSpec,
+    FlowConfig,
+    default_posterior_flow_builder,
+)
 from precond_npe_misspec.examples.svar import assumed_dgp as svar_assumed_dgp
 from precond_npe_misspec.examples.svar import default_pairs
 from precond_npe_misspec.examples.svar import prior_logpdf as svar_prior_logpdf
@@ -110,7 +113,7 @@ def _make_spec(cfg: Config) -> ExperimentSpec:
         theta_hi=jnp.ones(7),
         simulate_path="precond_npe_misspec.examples.svar:simulate",
         summaries_path="precond_npe_misspec.examples.svar:summaries_for_metrics",
-        build_embedder=get_embedder("svar_lagstats"),
+        # build_embedder=get_embedder("svar_lagstats"),
         # leave theta bounds None → train in unconstrained space
     )
 

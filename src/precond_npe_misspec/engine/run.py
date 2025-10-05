@@ -257,6 +257,7 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             loss_history=res.loss_history_theta,
             theta_labels=list(getattr(spec, "theta_labels", []) or []) or None,
             summary_labels=list(getattr(spec, "summary_labels", []) or []) or None,
+            theta_ref=run.theta_true,
         )
         ep = {
             "simulate": getattr(spec, "simulate_path", None),

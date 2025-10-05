@@ -41,7 +41,13 @@ def _jsonable(obj: Any) -> Any:
         return str(obj)
 
 
-def _plot_marginals(samples: np.ndarray, labels: Sequence[str], path: Path, dpi: int) -> None:
+def _plot_marginals(
+    samples: np.ndarray,
+    labels: Sequence[str],
+    path: Path,
+    dpi: int,
+    ref: np.ndarray | None = None,
+) -> None:
     if plt is None:
         return
     D = samples.shape[1]
@@ -51,6 +57,11 @@ def _plot_marginals(samples: np.ndarray, labels: Sequence[str], path: Path, dpi:
         ax = axes[i]
         ax.hist(samples[:, i], bins=60, density=True)
         ax.set_xlabel(labels[i])
+        if ref is not None and i < ref.shape[0]:
+            rv = float(ref[i])
+            ax.axvline(rv, color="red", linestyle="--", linewidth=1.0)
+            # Add a red 'x' at y=0 for the marginal
+            ax.scatter([rv], [0.0], color="red", marker="x", zorder=5)
         if i:
             ax.set_yticks([])
         else:
@@ -59,7 +70,13 @@ def _plot_marginals(samples: np.ndarray, labels: Sequence[str], path: Path, dpi:
     plt.close(fig)
 
 
-def _plot_pairgrid(samples: np.ndarray, labels: Sequence[str], path: Path, dpi: int) -> None:
+def _plot_pairgrid(
+    samples: np.ndarray,
+    labels: Sequence[str],
+    path: Path,
+    dpi: int,
+    ref: np.ndarray | None = None,
+) -> None:
     if plt is None:
         return
     D = samples.shape[1]
@@ -71,8 +88,19 @@ def _plot_pairgrid(samples: np.ndarray, labels: Sequence[str], path: Path, dpi: 
             ax = axes[i, j]
             if i == j:
                 ax.hist(samples[:, j], bins=60, density=True)
+                if ref is not None and j < ref.shape[0]:
+                    rv = float(ref[j])
+                    ax.axvline(rv, color="red", linestyle="--", linewidth=1.0)
+                    # Optional: also mark the baseline for density
+                    ax.scatter([rv], [0.0], color="red", marker="x", zorder=5)
             elif i > j:
                 ax.hist2d(samples[:, j], samples[:, i], bins=80)
+                if ref is not None and i < ref.shape[0] and j < ref.shape[0]:
+                    rj = float(ref[j])
+                    ri = float(ref[i])
+                    ax.axvline(rj, color="red", linestyle="--", linewidth=1.0)
+                    ax.axhline(ri, color="red", linestyle="--", linewidth=1.0)
+                    ax.scatter([rj], [ri], color="red", marker="x", s=20, zorder=5)
             else:
                 ax.axis("off")
             if i == D - 1:
@@ -134,11 +162,25 @@ def save_artifacts(
     # Labels
     theta_labels: Sequence[str] | None = None,
     summary_labels: Sequence[str] | None = None,
+    # Reference values (theta true / pseudo-true)
+    theta_ref: Sequence[float] | None = None,
 ) -> None:
     out = Path(outdir).expanduser()
     out.mkdir(parents=True, exist_ok=True)
 
     # Arrays
+    # Pull reference theta from explicit arg or from run config if present
+    ref_theta_arr: np.ndarray | None = None
+    if theta_ref is not None:
+        ref_theta_arr = _to_np(theta_ref)
+    else:
+        try:
+            rt = run_cfg.get("theta_true")
+            if rt is not None:
+                ref_theta_arr = _to_np(rt)
+        except Exception:
+            ref_theta_arr = None
+
     if posterior_samples is not None:
         np.savez_compressed(out / "posterior_samples.npz", samples=_to_np(posterior_samples))
     if robust_posterior_samples is not None:
@@ -205,17 +247,17 @@ def save_artifacts(
 
     # Plots
     dpi = int(run_cfg.get("fig_dpi", 160))
-    fmt = str(run_cfg.get("fig_format", "png"))
+    fmt = str(run_cfg.get("fig_format", "pdf"))
     if posterior_samples is not None:
         smp = _to_np(posterior_samples)
         th_labels = list(theta_labels) if theta_labels else [f"theta[{i}]" for i in range(smp.shape[1])]
-        _plot_marginals(smp, th_labels, out / f"posterior_marginals.{fmt}", dpi)
-        _plot_pairgrid(smp, th_labels, out / f"posterior_pairplot.{fmt}", dpi)
+        _plot_marginals(smp, th_labels, out / f"posterior_marginals.{fmt}", dpi, ref_theta_arr)
+        _plot_pairgrid(smp, th_labels, out / f"posterior_pairplot.{fmt}", dpi, ref_theta_arr)
     if robust_posterior_samples is not None:
         smp_r = _to_np(robust_posterior_samples)
         th_labels = list(theta_labels) if theta_labels else [f"theta[{i}]" for i in range(smp_r.shape[1])]
-        _plot_marginals(smp_r, th_labels, out / f"posterior_robust_marginals.{fmt}", dpi)
-        _plot_pairgrid(smp_r, th_labels, out / f"posterior_robust_pairplot.{fmt}", dpi)
+        _plot_marginals(smp_r, th_labels, out / f"posterior_robust_marginals.{fmt}", dpi, ref_theta_arr)
+        _plot_pairgrid(smp_r, th_labels, out / f"posterior_robust_pairplot.{fmt}", dpi, ref_theta_arr)
     if denoised_s_samples is not None:
         sden = _to_np(denoised_s_samples)
         s_labels = list(summary_labels) if summary_labels else [f"s[{i}]" for i in range(sden.shape[1])]
