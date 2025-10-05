@@ -30,7 +30,6 @@ def _fit_rf_per_param(S_np: np.ndarray, th_np: np.ndarray, cfg: Any) -> tuple[li
     for j in range(th_np.shape[1]):
         rf = RandomForestRegressor(
             n_estimators=cfg.rf_n_estimators,
-            # criterion="absolute_error",
             min_samples_leaf=cfg.rf_min_leaf,
             max_depth=cfg.rf_max_depth,
             bootstrap=True,

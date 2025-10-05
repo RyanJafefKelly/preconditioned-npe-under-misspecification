@@ -22,13 +22,13 @@ from precond_npe_misspec.engine.run import (
     RunConfig,
     run_experiment,
 )
-from precond_npe_misspec.examples import bvcbm as ex
-from precond_npe_misspec.examples.embeddings import build as get_embedder
-from precond_npe_misspec.pipelines.base_pnpe import (
+from precond_npe_misspec.engine.spec import (
     ExperimentSpec,
     FlowConfig,
     default_posterior_flow_builder,
 )
+from precond_npe_misspec.examples import bvcbm as ex
+from precond_npe_misspec.examples.embeddings import build as get_embedder
 
 
 def _uniform_logpdf_box(theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) -> jnp.ndarray:
@@ -143,9 +143,7 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
         # shape-aware result spec: (T,) if unbatched, else (B, T)
         is_batched = len(theta.shape) == 2
         shape: tuple[int, ...] = (int(theta.shape[0]), T_fixed) if is_batched else (T_fixed,)
-        out_shape: ShapeDtypeStruct = ShapeDtypeStruct(  # type: ignore[no-untyped-call]
-            shape, jnp.float32
-        )
+        out_shape: ShapeDtypeStruct = ShapeDtypeStruct(shape, jnp.float32)
         result: jax.Array = cast(
             jax.Array,
             jax.pure_callback(_simulate_np, out_shape, theta, seed, vmap_method="broadcast_all"),

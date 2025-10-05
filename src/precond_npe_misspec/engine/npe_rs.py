@@ -15,11 +15,7 @@ from flowjax.distributions import Normal, Transformed
 from flowjax.flows import coupling_flow
 from flowjax.train import fit_to_data
 
-from precond_npe_misspec.utils.mmd import (
-    median_heuristic_bandwidth,
-    mmd2_vstat,
-    rbf_kernel_matrix,
-)
+from precond_npe_misspec.utils.mmd import median_heuristic_bandwidth, mmd2_vstat, rbf_kernel_matrix
 
 # mypy: disallow-subclassing-any=False
 

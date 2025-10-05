@@ -10,8 +10,6 @@ import jax.nn as jnn
 import jax.numpy as jnp
 from equinox.nn import MLP, Conv1d
 
-from precond_npe_misspec.examples.svar import default_pairs
-
 type Array = jax.Array
 
 if TYPE_CHECKING:
@@ -50,9 +48,7 @@ def _ensure_bkt(x: Array, raw_shape: tuple[int, ...]) -> Array:
         T, K = int(raw_shape[0]), 1
     else:
         T, K = int(raw_shape[-2]), int(raw_shape[-1])
-    B = int(
-        x.size // (T * K)
-    )  # collapse all leading batch dims (incl. extra singleton)
+    B = int(x.size // (T * K))  # collapse all leading batch dims (incl. extra singleton)
     x_btk = jnp.reshape(x, (B, T, K))  # (B, T, K)
     return jnp.swapaxes(x_btk, -1, -2)  # (B, K, T)
 
@@ -71,18 +67,14 @@ def _causal_pad(x_bkt: Array, kernel: int, dilation: int) -> Array:
 
 
 @register("mlp_flat")
-def mlp_flat(
-    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
-) -> _EqxModule:
+def mlp_flat(key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any) -> _EqxModule:
     in_size = int(jnp.prod(jnp.array(raw_cond_shape)))
     mlp = MLP(
         in_size=in_size,
         out_size=int(embed_dim),
         width_size=int(getattr(cfg, "embed_width", 128)),
         depth=int(getattr(cfg, "embed_depth", 2)),
-        activation=(
-            jnn.relu if getattr(cfg, "activation", "relu") == "relu" else jnn.tanh
-        ),
+        activation=(jnn.relu if getattr(cfg, "activation", "relu") == "relu" else jnn.tanh),
         key=key,
     )
 
@@ -118,11 +110,7 @@ class _TCNBlock(_EqxModule):
         self.k, self.d = int(k), int(d)
         self.dil = Conv1d(in_ch, ch, kernel_size=k, dilation=d, use_bias=True, key=k1)
         self.pw = Conv1d(ch, ch, kernel_size=1, use_bias=True, key=k2)
-        self.proj = (
-            None
-            if in_ch == ch
-            else Conv1d(in_ch, ch, kernel_size=1, use_bias=True, key=k3)
-        )
+        self.proj = None if in_ch == ch else Conv1d(in_ch, ch, kernel_size=1, use_bias=True, key=k3)
 
     def __call__(self, x_bkt: Array) -> Array:
         # x_bkt: (B, C_in, T)
@@ -184,9 +172,7 @@ class _SVAR_TCN(_EqxModule):
 
 
 @register("tcn_small")
-def tcn_small(
-    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
-) -> _EqxModule:
+def tcn_small(key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any) -> _EqxModule:
     ch = int(getattr(cfg, "tcn_channels", 32))
     ksize = int(getattr(cfg, "tcn_kernel", 5))
     dilations = tuple(getattr(cfg, "tcn_dilations", (1, 2, 4)))
@@ -205,9 +191,7 @@ def tcn_small(
 
 
 @register("asv_tcn")
-def asv_tcn(
-    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
-) -> _EqxModule:
+def asv_tcn(key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any) -> _EqxModule:
     """Default embedder for alpha‑SV raw returns."""
     ch = int(getattr(cfg, "tcn_channels", 32))
     ksize = int(getattr(cfg, "tcn_kernel", 5))
@@ -228,9 +212,7 @@ def asv_tcn(
 
 
 @register("iid_deepset")
-def iid_deepset(
-    key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
-) -> _EqxModule:
+def iid_deepset(key: Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any) -> _EqxModule:
     """
     DeepSets for iid 1D samples y[0:T):  φ: R->R^H, mean-pool over T,  ρ: R^H->R^{embed_dim}.
     Accepts x with shape (T,) or batched (..., T). Returns (embed_dim,) or batched (..., embed_dim).
@@ -290,295 +272,297 @@ def iid_deepset(
     return _DeepSet1D(phi, rho, raw_cond_shape, width)
 
 
-@register("svar_ols_head")
-def svar_ols_head(key, embed_dim, raw_cond_shape, cfg):
-    import equinox as eqx
-    import jax
-    import jax.numpy as jnp
-    from equinox.nn import MLP
+# @register("svar_ols_head")
+# def svar_ols_head(
+#     key: Any, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
+# ) -> _EqxModule:
+#     import equinox as eqx
+#     import jax
+#     import jax.numpy as jnp
+#     from equinox.nn import MLP
 
-    def _pairs(K: int):
-        # default SVAR pairs: (0,1),(2,3),(4,5) for K=6; generalizes if K even
-        return jnp.arange(K, dtype=jnp.int32).reshape(-1, 2)
+#     def _pairs(K: int) -> jax.Array:
+#         # default SVAR pairs: (0,1),(2,3),(4,5) for K=6; generalizes if K even
+#         return jnp.arange(K, dtype=jnp.int32).reshape(-1, 2)
 
-    width = int(getattr(cfg, "embed_width", 64))
-    depth = int(getattr(cfg, "embed_depth", 1))
-    head = MLP(
-        in_size=8,
-        out_size=int(embed_dim),
-        width_size=width,
-        depth=depth,
-        activation=jax.nn.relu,
-        key=key,
-    )
+#     width = int(getattr(cfg, "embed_width", 64))
+#     depth = int(getattr(cfg, "embed_depth", 1))
+#     head = MLP(
+#         in_size=8,
+#         out_size=int(embed_dim),
+#         width_size=width,
+#         depth=depth,
+#         activation=jax.nn.relu,
+#         key=key,
+#     )
 
-    class _OLS(eqx.Module):
-        head: MLP
-        raw_shape: tuple[int, ...]
+#     class _OLS(eqx.Module):
+#         head: MLP
+#         raw_shape: tuple[int, ...]
 
-        def __init__(self, head, raw_cond_shape):
-            self.head = head
-            self.raw_shape = tuple(raw_cond_shape)
+#         def __init__(self, head: MLP, raw_cond_shape: tuple[int, ...]) -> None:
+#             self.head = head
+#             self.raw_shape = tuple(raw_cond_shape)
 
-        def __call__(self, x):
-            # x ∈ ℝ^{T×K} or batched (...,T,K) → map to (B,d_emb)
-            x_bkt = _ensure_bkt(jnp.asarray(x, jnp.float32), self.raw_shape)  # (B,K,T)
-            Y_btk = jnp.swapaxes(x_bkt, -1, -2)  # (B,T,K)
-            K = int(self.raw_shape[-1] if len(self.raw_shape) == 2 else 1)
+#         def __call__(self, x: jax.Array) -> jax.Array:
+#             # x ∈ ℝ^{T×K} or batched (...,T,K) → map to (B,d_emb)
+#             x_bkt = _ensure_bkt(jnp.asarray(x, jnp.float32), self.raw_shape)  # (B,K,T)
+#             Y_btk = jnp.swapaxes(x_bkt, -1, -2)  # (B,T,K)
+#             K = int(self.raw_shape[-1] if len(self.raw_shape) == 2 else 1)
 
-            def _one(Y):
-                T = Y.shape[0]
-                Y0, Y1 = Y[:-1], Y[1:]  # (T-1,K)
-                s00 = (Y0.T @ Y0) / (T - 1)  # (K,K)
-                s10 = (Y1.T @ Y0) / (T - 1)  # (K,K)
-                reg = 1e-4 * jnp.trace(s00) / K
-                Xhat = s10 @ jnp.linalg.inv(s00 + reg * jnp.eye(K, dtype=Y.dtype))
-                resid = Y1 - Y0 @ Xhat.T
-                sigma = jnp.std(resid)
+#             def _one(Y: jax.Array) -> jax.Array:
+#                 T = Y.shape[0]
+#                 Y0, Y1 = Y[:-1], Y[1:]  # (T-1,K)
+#                 s00 = (Y0.T @ Y0) / (T - 1)  # (K,K)
+#                 s10 = (Y1.T @ Y0) / (T - 1)  # (K,K)
+#                 reg = 1e-4 * jnp.trace(s00) / K
+#                 Xhat = s10 @ jnp.linalg.inv(s00 + reg * jnp.eye(K, dtype=Y.dtype))
+#                 resid = Y1 - Y0 @ Xhat.T
+#                 sigma = jnp.std(resid)
 
-                pairs = _pairs(K)
-                fwd = Xhat[pairs[:, 0], pairs[:, 1]]
-                rev = Xhat[pairs[:, 1], pairs[:, 0]]
-                ymean = jnp.mean(Y)
-                stats = jnp.concatenate(
-                    [fwd, rev, jnp.array([sigma, ymean], Y.dtype)]
-                )  # len=2*m+2=8 for K=6
-                return stats
+#                 pairs = _pairs(K)
+#                 fwd = Xhat[pairs[:, 0], pairs[:, 1]]
+#                 rev = Xhat[pairs[:, 1], pairs[:, 0]]
+#                 ymean = jnp.mean(Y)
+#                 stats = jnp.concatenate(
+#                     [fwd, rev, jnp.array([sigma, ymean], Y.dtype)]
+#                 )  # len=2*m+2=8 for K=6
+#                 return stats
 
-            S = eqx.filter_vmap(_one)(Y_btk)  # (B, 8)
-            Z = eqx.filter_vmap(self.head)(S)  # (B, d_emb)
-            return Z[0] if (S.shape[0] == 1 and x.ndim == len(self.raw_shape)) else Z
+#             S = eqx.filter_vmap(_one)(Y_btk)  # (B, 8)
+#             Z = eqx.filter_vmap(self.head)(S)  # (B, d_emb)
+#             return Z[0] if (S.shape[0] == 1 and x.ndim == len(self.raw_shape)) else Z
 
-    return _OLS(head, raw_cond_shape)
-
-
-@register("svar_lagstats")
-def svar_lagstats(key, embed_dim, raw_cond_shape, cfg):
-    import equinox as eqx
-    import jax
-    import jax.numpy as jnp
-    from equinox.nn import MLP
-
-    def _pairs(K):
-        return jnp.arange(K, dtype=jnp.int32).reshape(-1, 2)
-
-    width = int(getattr(cfg, "embed_width", 64))
-    depth = int(getattr(cfg, "embed_depth", 1))
-    head = MLP(
-        in_size=8,
-        out_size=int(embed_dim),
-        width_size=width,
-        depth=depth,
-        activation=jax.nn.relu,
-        key=key,
-    )
-
-    class _LagStats(eqx.Module):
-        head: MLP
-        raw_shape: tuple[int, ...]
-
-        def __init__(self, head, raw_cond_shape):
-            self.head, self.raw_shape = head, tuple(raw_cond_shape)
-
-        def __call__(self, x):
-            x_bkt = _ensure_bkt(jnp.asarray(x, jnp.float32), self.raw_shape)  # (B,K,T)
-            Y_btk = jnp.swapaxes(x_bkt, -1, -2)  # (B,T,K)
-            K = int(self.raw_shape[-1] if len(self.raw_shape) == 2 else 1)
-            pairs = _pairs(K)
-
-            def _one(Y):
-                C1 = (Y[1:].T @ Y[:-1]) / (Y.shape[0] - 1)  # (K,K)
-                fwd = C1[pairs[:, 0], pairs[:, 1]]
-                rev = C1[pairs[:, 1], pairs[:, 0]]
-                s_sigma = jnp.std(Y)
-                ymean = jnp.mean(Y)
-                stats = jnp.concatenate(
-                    [fwd, rev, jnp.array([s_sigma, ymean], Y.dtype)]
-                )  # len=8 for K=6
-                return stats
-
-            S = eqx.filter_vmap(_one)(Y_btk)  # (B,8)
-            Z = eqx.filter_vmap(self.head)(S)  # (B,d_emb)
-            return Z[0] if (S.shape[0] == 1 and x.ndim == len(self.raw_shape)) else Z
-
-    return _LagStats(head, raw_cond_shape)
+#     return cast(_EqxModule, _OLS(head, raw_cond_shape))
 
 
-class _FixedLinear(eqx.Module):
-    W: jax.Array = eqx.field(static=True)
-    b: jax.Array | None = eqx.field(static=True)
+# @register("svar_lagstats")
+# def svar_lagstats(key, embed_dim, raw_cond_shape, cfg):
+#     import equinox as eqx
+#     import jax
+#     import jax.numpy as jnp
+#     from equinox.nn import MLP
 
-    def __init__(
-        self, key: jax.Array, in_dim: int, out_dim: int, use_bias: bool = False
-    ):
-        k1, k2 = jax.random.split(key)
-        # Heuristically scale to keep magnitudes stable.
-        W = jax.random.normal(k1, (in_dim, out_dim), dtype=jnp.float32) / jnp.sqrt(
-            in_dim
-        )
-        self.W = W
-        self.b = jnp.zeros((out_dim,), dtype=jnp.float32) if use_bias else None
+#     def _pairs(K):
+#         return jnp.arange(K, dtype=jnp.int32).reshape(-1, 2)
 
-    def __call__(self, x: jax.Array) -> jax.Array:
-        y = jnp.matmul(x, self.W)
-        return y if self.b is None else y + cast(jax.Array, self.b)
+#     width = int(getattr(cfg, "embed_width", 64))
+#     depth = int(getattr(cfg, "embed_depth", 1))
+#     head = MLP(
+#         in_size=8,
+#         out_size=int(embed_dim),
+#         width_size=width,
+#         depth=depth,
+#         activation=jax.nn.relu,
+#         key=key,
+#     )
 
+#     class _LagStats(eqx.Module):
+#         head: MLP
+#         raw_shape: tuple[int, ...]
 
-def _lagstats_batched(x_bkt: jax.Array, pairs: jax.Array) -> jax.Array:
-    """x_bkt: (B,K,T) -> stats (B, 2m+2). Matches svar.summaries structure."""
-    B, K, T = x_bkt.shape
-    i, j = pairs[:, 0], pairs[:, 1]  # (m,)
-    A = (x_bkt[:, i, 1:] * x_bkt[:, j, :-1]).sum(axis=-1)  # (B,m)
-    Bdir = (x_bkt[:, j, 1:] * x_bkt[:, i, :-1]).sum(axis=-1)  # (B,m)
-    sdir = jnp.concatenate([A, Bdir], axis=-1) / jnp.asarray(T, jnp.float32)
-    pooled = x_bkt.reshape(B, -1)
-    s_sigma = jnp.std(pooled, axis=-1, ddof=0)  # (B,)
-    s_mu = jnp.mean(pooled, axis=-1)  # (B,)
-    return jnp.concatenate([sdir, s_sigma[:, None], s_mu[:, None]], axis=-1)  # (B,2m+2)
+#         def __init__(self, head, raw_cond_shape):
+#             self.head, self.raw_shape = head, tuple(raw_cond_shape)
 
+#         def __call__(self, x):
+#             x_bkt = _ensure_bkt(jnp.asarray(x, jnp.float32), self.raw_shape)  # (B,K,T)
+#             Y_btk = jnp.swapaxes(x_bkt, -1, -2)  # (B,T,K)
+#             K = int(self.raw_shape[-1] if len(self.raw_shape) == 2 else 1)
+#             pairs = _pairs(K)
 
-@register("svar_lagstats_cpu")
-def svar_lagstats_cpu(
-    key: jax.Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
-) -> _EqxModule:
-    """
-    CPU‑cheap embedder. Computes lag‑1 directed cross‑products for default SVAR pairs,
-    plus pooled std and mean. Optional fixed linear projection to embed_dim.
-    """
+#             def _one(Y):
+#                 C1 = (Y[1:].T @ Y[:-1]) / (Y.shape[0] - 1)  # (K,K)
+#                 fwd = C1[pairs[:, 0], pairs[:, 1]]
+#                 rev = C1[pairs[:, 1], pairs[:, 0]]
+#                 s_sigma = jnp.std(Y)
+#                 ymean = jnp.mean(Y)
+#                 stats = jnp.concatenate(
+#                     [fwd, rev, jnp.array([s_sigma, ymean], Y.dtype)]
+#                 )  # len=8 for K=6
+#                 return stats
 
-    # Accept (..., T, K) or (..., T) → (B,K,T)
-    def _to_bkt(x: jax.Array) -> jax.Array:
-        if len(raw_cond_shape) == 1:
-            T, K = int(raw_cond_shape[0]), 1
-        else:
-            T, K = int(raw_cond_shape[-2]), int(raw_cond_shape[-1])
-        B = int(x.size // (T * K))
-        return jnp.swapaxes(jnp.reshape(x, (B, T, K)), -1, -2).astype(jnp.float32)
+#             S = eqx.filter_vmap(_one)(Y_btk)  # (B,8)
+#             Z = eqx.filter_vmap(self.head)(S)  # (B,d_emb)
+#             return Z[0] if (S.shape[0] == 1 and x.ndim == len(self.raw_shape)) else Z
 
-    pairs = default_pairs(
-        int(raw_cond_shape[-1]) if len(raw_cond_shape) == 2 else 6
-    )  # assumes k=6 if 1D
-
-    # Output size before projection
-    m = int(pairs.shape[0])
-    out0 = 2 * m + 2
-
-    proj = (
-        None
-        if embed_dim == out0
-        else _FixedLinear(key, out0, embed_dim, use_bias=False)
-    )
-
-    class _SVARLagStatsCPU(_EqxModule):
-        pairs: jax.Array
-        proj: _FixedLinear | None
-        raw_shape: tuple[int, ...]
-
-        def __init__(
-            self,
-            pairs: jax.Array,
-            proj: _FixedLinear | None,
-            raw_shape: tuple[int, ...],
-        ):
-            self.pairs = pairs
-            self.proj = proj
-            self.raw_shape = tuple(raw_shape)
-
-        def __call__(self, x: jax.Array) -> jax.Array:
-            xb = _to_bkt(x)  # (B,K,T)
-            z = _lagstats_batched(xb, self.pairs)  # (B, out0)
-            if self.proj is not None:
-                z = jax.vmap(self.proj)(z)
-            return z[0] if z.shape[0] == 1 else z
-
-    return _SVARLagStatsCPU(pairs, proj, tuple(raw_cond_shape))
+#     return _LagStats(head, raw_cond_shape)
 
 
-@register("svar_lagstats_sketch")
-def svar_lagstats_sketch(
-    key: jax.Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
-) -> _EqxModule:
-    M = int(getattr(cfg, "sketch_M", 128))
+# class _FixedLinear(eqx.Module):
+#     W: jax.Array = eqx.field(static=True)
+#     b: jax.Array | None = eqx.field(static=True)
 
-    def _to_bkt(x: jax.Array) -> jax.Array:
-        if len(raw_cond_shape) == 1:
-            T, K = int(raw_cond_shape[0]), 1
-        else:
-            T, K = int(raw_cond_shape[-2]), int(raw_cond_shape[-1])
-        B = int(x.size // (T * K))
-        return jnp.swapaxes(jnp.reshape(x, (B, T, K)), -1, -2).astype(jnp.float32)
+#     def __init__(
+#         self, key: jax.Array, in_dim: int, out_dim: int, use_bias: bool = False
+#     ):
+#         k1, k2 = jax.random.split(key)
+#         # Heuristically scale to keep magnitudes stable.
+#         W = jax.random.normal(k1, (in_dim, out_dim), dtype=jnp.float32) / jnp.sqrt(
+#             in_dim
+#         )
+#         self.W = W
+#         self.b = jnp.zeros((out_dim,), dtype=jnp.float32) if use_bias else None
 
-    # Shapes
-    if len(raw_cond_shape) == 1:
-        T, K = int(raw_cond_shape[0]), 1
-    else:
-        T, K = int(raw_cond_shape[-2]), int(raw_cond_shape[-1])
+#     def __call__(self, x: jax.Array) -> jax.Array:
+#         y = jnp.matmul(x, self.W)
+#         return y if self.b is None else y + cast(jax.Array, self.b)
 
-    pairs = default_pairs(K if K else 6)
 
-    # Fixed subsample of time indices in [1, T-1] to respect lag‑1
-    key_idx = jax.random.fold_in(key, 17)
-    idx1 = jax.random.choice(
-        key_idx,
-        jnp.arange(1, T, dtype=jnp.int32),
-        shape=(min(M, max(T - 1, 1)),),
-        replace=False,
-    )
-    idx0 = idx1 - 1
-    M_eff = idx1.shape[0]
-    m = int(pairs.shape[0])
-    out0 = 2 * m + 2
+# def _lagstats_batched(x_bkt: jax.Array, pairs: jax.Array) -> jax.Array:
+#     """x_bkt: (B,K,T) -> stats (B, 2m+2). Matches svar.summaries structure."""
+#     B, K, T = x_bkt.shape
+#     i, j = pairs[:, 0], pairs[:, 1]  # (m,)
+#     A = (x_bkt[:, i, 1:] * x_bkt[:, j, :-1]).sum(axis=-1)  # (B,m)
+#     Bdir = (x_bkt[:, j, 1:] * x_bkt[:, i, :-1]).sum(axis=-1)  # (B,m)
+#     sdir = jnp.concatenate([A, Bdir], axis=-1) / jnp.asarray(T, jnp.float32)
+#     pooled = x_bkt.reshape(B, -1)
+#     s_sigma = jnp.std(pooled, axis=-1, ddof=0)  # (B,)
+#     s_mu = jnp.mean(pooled, axis=-1)  # (B,)
+#     return jnp.concatenate([sdir, s_sigma[:, None], s_mu[:, None]], axis=-1)  # (B,2m+2)
 
-    proj = (
-        None
-        if embed_dim == out0
-        else _FixedLinear(key, out0, embed_dim, use_bias=False)
-    )
 
-    class _SVARLagStatsSketch(_EqxModule):
-        pairs: jax.Array
-        idx0: jax.Array
-        idx1: jax.Array
-        proj: _FixedLinear | None
+# @register("svar_lagstats_cpu")
+# def svar_lagstats_cpu(
+#     key: jax.Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
+# ) -> _EqxModule:
+#     """
+#     CPU‑cheap embedder. Computes lag‑1 directed cross‑products for default SVAR pairs,
+#     plus pooled std and mean. Optional fixed linear projection to embed_dim.
+#     """
 
-        def __init__(
-            self,
-            pairs: jax.Array,
-            idx0: jax.Array,
-            idx1: jax.Array,
-            proj: _FixedLinear | None,
-        ):
-            self.pairs = pairs
-            self.idx0 = idx0
-            self.idx1 = idx1
-            self.proj = proj
+#     # Accept (..., T, K) or (..., T) → (B,K,T)
+#     def _to_bkt(x: jax.Array) -> jax.Array:
+#         if len(raw_cond_shape) == 1:
+#             T, K = int(raw_cond_shape[0]), 1
+#         else:
+#             T, K = int(raw_cond_shape[-2]), int(raw_cond_shape[-1])
+#         B = int(x.size // (T * K))
+#         return jnp.swapaxes(jnp.reshape(x, (B, T, K)), -1, -2).astype(jnp.float32)
 
-        def __call__(self, x: jax.Array) -> jax.Array:
-            xb = _to_bkt(x)  # (B,K,T)
-            B, K, _ = xb.shape
-            i, j = self.pairs[:, 0], self.pairs[:, 1]  # (m,)
+#     pairs = default_pairs(
+#         int(raw_cond_shape[-1]) if len(raw_cond_shape) == 2 else 6
+#     )  # assumes k=6 if 1D
 
-            # Gather (vectorized) only at idx0/idx1
-            x_i_1 = xb[:, i[:, None], self.idx1[None, :]]  # (B,m,M)
-            x_j_0 = xb[:, j[:, None], self.idx0[None, :]]  # (B,m,M)
-            x_j_1 = xb[:, j[:, None], self.idx1[None, :]]
-            x_i_0 = xb[:, i[:, None], self.idx0[None, :]]
+#     # Output size before projection
+#     m = int(pairs.shape[0])
+#     out0 = 2 * m + 2
 
-            A = (x_i_1 * x_j_0).sum(axis=-1) / jnp.asarray(M_eff, jnp.float32)  # (B,m)
-            Bdir = (x_j_1 * x_i_0).sum(axis=-1) / jnp.asarray(
-                M_eff, jnp.float32
-            )  # (B,m)
+#     proj = (
+#         None
+#         if embed_dim == out0
+#         else _FixedLinear(key, out0, embed_dim, use_bias=False)
+#     )
 
-            # Cheap pooled scale + mean on the SAME subsample for maximal speed
-            flat1 = xb[:, :, self.idx1].reshape(B, -1)
-            s_sigma = jnp.std(flat1, axis=-1, ddof=0)  # (B,)
-            s_mu = jnp.mean(flat1, axis=-1)  # (B,)
+#     class _SVARLagStatsCPU(_EqxModule):
+#         pairs: jax.Array
+#         proj: _FixedLinear | None
+#         raw_shape: tuple[int, ...]
 
-            z = jnp.concatenate(
-                [A, Bdir, s_sigma[:, None], s_mu[:, None]], axis=-1
-            )  # (B, out0)
-            if self.proj is not None:
-                z = jax.vmap(self.proj)(z)
-            return z[0] if z.shape[0] == 1 else z
+#         def __init__(
+#             self,
+#             pairs: jax.Array,
+#             proj: _FixedLinear | None,
+#             raw_shape: tuple[int, ...],
+#         ):
+#             self.pairs = pairs
+#             self.proj = proj
+#             self.raw_shape = tuple(raw_shape)
 
-    return _SVARLagStatsSketch(pairs, idx0, idx1, proj)
+#         def __call__(self, x: jax.Array) -> jax.Array:
+#             xb = _to_bkt(x)  # (B,K,T)
+#             z = _lagstats_batched(xb, self.pairs)  # (B, out0)
+#             if self.proj is not None:
+#                 z = jax.vmap(self.proj)(z)
+#             return z[0] if z.shape[0] == 1 else z
+
+#     return _SVARLagStatsCPU(pairs, proj, tuple(raw_cond_shape))
+
+
+# @register("svar_lagstats_sketch")
+# def svar_lagstats_sketch(
+#     key: jax.Array, embed_dim: int, raw_cond_shape: tuple[int, ...], cfg: Any
+# ) -> _EqxModule:
+#     M = int(getattr(cfg, "sketch_M", 128))
+
+#     def _to_bkt(x: jax.Array) -> jax.Array:
+#         if len(raw_cond_shape) == 1:
+#             T, K = int(raw_cond_shape[0]), 1
+#         else:
+#             T, K = int(raw_cond_shape[-2]), int(raw_cond_shape[-1])
+#         B = int(x.size // (T * K))
+#         return jnp.swapaxes(jnp.reshape(x, (B, T, K)), -1, -2).astype(jnp.float32)
+
+#     # Shapes
+#     if len(raw_cond_shape) == 1:
+#         T, K = int(raw_cond_shape[0]), 1
+#     else:
+#         T, K = int(raw_cond_shape[-2]), int(raw_cond_shape[-1])
+
+#     pairs = default_pairs(K if K else 6)
+
+#     # Fixed subsample of time indices in [1, T-1] to respect lag‑1
+#     key_idx = jax.random.fold_in(key, 17)
+#     idx1 = jax.random.choice(
+#         key_idx,
+#         jnp.arange(1, T, dtype=jnp.int32),
+#         shape=(min(M, max(T - 1, 1)),),
+#         replace=False,
+#     )
+#     idx0 = idx1 - 1
+#     M_eff = idx1.shape[0]
+#     m = int(pairs.shape[0])
+#     out0 = 2 * m + 2
+
+#     proj = (
+#         None
+#         if embed_dim == out0
+#         else _FixedLinear(key, out0, embed_dim, use_bias=False)
+#     )
+
+#     class _SVARLagStatsSketch(_EqxModule):
+#         pairs: jax.Array
+#         idx0: jax.Array
+#         idx1: jax.Array
+#         proj: _FixedLinear | None
+
+#         def __init__(
+#             self,
+#             pairs: jax.Array,
+#             idx0: jax.Array,
+#             idx1: jax.Array,
+#             proj: _FixedLinear | None,
+#         ):
+#             self.pairs = pairs
+#             self.idx0 = idx0
+#             self.idx1 = idx1
+#             self.proj = proj
+
+#         def __call__(self, x: jax.Array) -> jax.Array:
+#             xb = _to_bkt(x)  # (B,K,T)
+#             B, K, _ = xb.shape
+#             i, j = self.pairs[:, 0], self.pairs[:, 1]  # (m,)
+
+#             # Gather (vectorized) only at idx0/idx1
+#             x_i_1 = xb[:, i[:, None], self.idx1[None, :]]  # (B,m,M)
+#             x_j_0 = xb[:, j[:, None], self.idx0[None, :]]  # (B,m,M)
+#             x_j_1 = xb[:, j[:, None], self.idx1[None, :]]
+#             x_i_0 = xb[:, i[:, None], self.idx0[None, :]]
+
+#             A = (x_i_1 * x_j_0).sum(axis=-1) / jnp.asarray(M_eff, jnp.float32)  # (B,m)
+#             Bdir = (x_j_1 * x_i_0).sum(axis=-1) / jnp.asarray(
+#                 M_eff, jnp.float32
+#             )  # (B,m)
+
+#             # Cheap pooled scale + mean on the SAME subsample for maximal speed
+#             flat1 = xb[:, :, self.idx1].reshape(B, -1)
+#             s_sigma = jnp.std(flat1, axis=-1, ddof=0)  # (B,)
+#             s_mu = jnp.mean(flat1, axis=-1)  # (B,)
+
+#             z = jnp.concatenate(
+#                 [A, Bdir, s_sigma[:, None], s_mu[:, None]], axis=-1
+#             )  # (B, out0)
+#             if self.proj is not None:
+#                 z = jax.vmap(self.proj)(z)
+#             return z[0] if z.shape[0] == 1 else z
+
+#     return _SVARLagStatsSketch(pairs, idx0, idx1, proj)

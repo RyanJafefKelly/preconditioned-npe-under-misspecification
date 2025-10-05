@@ -8,9 +8,15 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from precond_npe_misspec.engine.run import (NpeRsConfig, PosteriorConfig,
-                                            PrecondConfig, RobustConfig,
-                                            RunConfig, run_experiment)
+from precond_npe_misspec.engine.run import (
+    NpeRsConfig,
+    PosteriorConfig,
+    PrecondConfig,
+    RobustConfig,
+    RunConfig,
+    run_experiment,
+)
+from precond_npe_misspec.engine.spec import ExperimentSpec, FlowConfig, default_posterior_flow_builder
 from precond_npe_misspec.examples.embeddings import build as get_embedder
 from precond_npe_misspec.examples.svar import assumed_dgp as svar_assumed_dgp
 from precond_npe_misspec.examples.svar import default_pairs
@@ -18,8 +24,6 @@ from precond_npe_misspec.examples.svar import prior_logpdf as svar_prior_logpdf
 from precond_npe_misspec.examples.svar import prior_sample as svar_prior_sample
 from precond_npe_misspec.examples.svar import summaries as svar_summaries
 from precond_npe_misspec.examples.svar import true_dgp as svar_true_dgp
-from precond_npe_misspec.pipelines.base_pnpe import (
-    ExperimentSpec, FlowConfig, default_posterior_flow_builder)
 
 type Array = jax.Array
 
@@ -99,9 +103,7 @@ def _make_spec(cfg: Config) -> ExperimentSpec:
         prior_sample=lambda key: svar_prior_sample(key, pairs=pairs),
         prior_logpdf=lambda th: svar_prior_logpdf(th, pairs=pairs),
         true_dgp=true_dgp,
-        simulate=lambda key, theta, **kw: svar_assumed_dgp(
-            key, theta, k=cfg.k, T=cfg.T, pairs=pairs
-        ),
+        simulate=lambda key, theta, **kw: svar_assumed_dgp(key, theta, k=cfg.k, T=cfg.T, pairs=pairs),
         summaries=lambda x: summaries_fn(x, pairs=pairs),
         build_posterior_flow=default_posterior_flow_builder(theta_dim, s_dim),
         theta_lo=jnp.array([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 0]),

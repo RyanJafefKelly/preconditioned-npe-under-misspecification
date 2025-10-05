@@ -9,9 +9,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-# Quick in-file knob for RF-ABC weight tempering; tweak as needed for experiments.
-RF_ABC_WEIGHT_TEMPERATURE: float = 1.0
-
 from precond_npe_misspec.algorithms.abc_rf import abc_rf_select
 from precond_npe_misspec.algorithms.smc_abc import run_smc_abc
 from precond_npe_misspec.utils import distances as dist
@@ -113,7 +110,7 @@ def _abc_rejection_with_sim(
     dist_fn: DistanceFn,
     batch_size: int | None,
     sim_kwargs: dict[str, Any] | None,
-) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray | None]:
     """Rejection ABC with on‑the‑fly simulation. Returns accepted (θ, S, x)."""
     if batch_size is None:
         batch_size = max(1, min(n_sims, 2048))
@@ -294,27 +291,13 @@ def run_preconditioning(
         w = np.clip(w, 0.0, None)
         w /= w.sum() + 1e-12
 
-        # RF_ABC_WEIGHT_TEMPERATURE = 0.5
-        temperature = RF_ABC_WEIGHT_TEMPERATURE
-        if temperature <= 0:
-            raise ValueError("RF_ABC_WEIGHT_TEMPERATURE must be positive.")
-        if not np.isclose(temperature, 1.0):
-            # Tempering sharpens (T<1) or flattens (T>1) the sampling weights.
-            w = np.power(w, 1.0 / temperature)
-            w /= w.sum() + 1e-12
-
         # sample indices WITH replacement (importance resampling)
         keep = (
             int(np.ceil(run.precond.q_precond * w.size))
             if 0 < run.precond.q_precond <= 1.0
             else int(min(w.size, run.precond.q_precond))
         )
-        # num_nonzero_weights = np.count_nonzero(w)
-        # keep = int(min(keep, num_nonzero_weights))
-        # if num_nonzero_weights < keep:
-        #     print(
-        #         f"Warning: only {num_nonzero_weights} samples have nonzero weight; reducing keep={keep} accordingly."
-        #     )
+
         rng_np = np.random.default_rng(run.precond.rf_random_state)
         # NOTE: gone with False here ... priority is just to get a decent set for training
         # not posterior approximation.
@@ -372,77 +355,3 @@ def run_preconditioning(
 
         return theta_sel.astype(jnp.float32), S_sel.astype(jnp.float32), X_sel
     raise ValueError(f"Unknown preconditioning method: {method!r}")
-
-
-#     # keep size
-#     keep = (
-#         int(np.ceil(run.precond.q_precond * w.size))
-#         if 0 < run.precond.q_precond <= 1.0
-#         else int(min(w.size, run.precond.q_precond))
-#     )
-
-#     rng_np = np.random.default_rng(run.precond.rf_random_state)
-
-#     def residual_counts(
-#         rng: np.random.Generator, w: np.ndarray, K: int
-#     ) -> np.ndarray:
-#         m = np.floor(K * w).astype(int)  # deterministic part
-#         r = int(K - m.sum())
-#         if r > 0:
-#             rem = K * w - m
-#             rem = rem / (rem.sum() + 1e-12)
-#             add = rng.choice(w.size, size=r, replace=False, p=rem)
-#             m[add] += 1
-#         return m  # length N, sum K
-
-#     def systematic_from_counts(cnt: np.ndarray) -> np.ndarray:
-#         # expand to explicit indices (size K)
-#         idx = np.repeat(np.arange(cnt.size, dtype=np.int64), cnt)
-#         # stable shuffle to break blocks
-#         return rng_np.permutation(idx)
-
-#     cnt = residual_counts(rng_np, w, keep)  # integer multiplicities, sum=keep
-#     idx = systematic_from_counts(cnt)  # shape (keep,)
-
-#     # Diagnostics
-#     ESS = float(1.0 / (w**2).sum())
-#     uniq = int(np.count_nonzero(cnt))
-#     print(
-#         f"Preconditioning: abc_rf | kept={keep}/{w.size} | OOB R^2={diag['oob_r2']:.3f} | ESS={ESS:.1f} | unique={uniq}"
-#     )
-
-#     # Re-simulate fresh (X,S) for selected thetas to avoid identical triples
-#     theta_sel = theta_all[idx]  # (keep, θ_dim)
-
-#     key, k_resim = jax.random.split(key)
-#     keys = jax.random.split(k_resim, theta_sel.shape[0])
-#     X_new = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
-#         keys, theta_sel
-#     )
-#     S_new = jax.vmap(spec.summaries)(X_new)
-
-#     return theta_sel.astype(jnp.float32), S_new.astype(jnp.float32), X_new
-# raise ValueError(f"Unknown preconditioning method: {method!r}")
-
-
-# jit data
-#     key, k_rng = jax.random.split(key)
-#     theta_all = theta_all + random.normal(k_rng, theta_all.shape) * 1e-6
-#     S_all = S_all + random.normal(k_rng, S_all.shape) * 1e-6
-
-#     w = np.asarray(diag["weights"], dtype=np.float64)
-#     keep = (
-#         int(np.ceil(run.precond.q_precond * w.size))
-#         if 0 < run.precond.q_precond <= 1.0
-#         else int(min(w.size, run.precond.q_precond))
-#     )
-#     rng_np = np.random.default_rng(run.precond.rf_random_state)
-#     idx = rng_np.choice(w.size, size=keep, replace=True, p=w / (w.sum() + 1e-12))
-#     print(
-#         f"Preconditioning: abc_rf | kept={keep}/{w.size} | OOB R^2={diag['oob_r2']:.3f}"
-#     )
-#     return (
-#         theta_all[idx].astype(jnp.float32),
-#         S_all[idx].astype(jnp.float32),
-#         X_all[idx],
-#     )
