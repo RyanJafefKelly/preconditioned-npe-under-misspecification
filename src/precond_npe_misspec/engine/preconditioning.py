@@ -29,6 +29,29 @@ def _to_vec(d: jnp.ndarray) -> jnp.ndarray:
     return d if d.ndim == 1 else jnp.mean(d.reshape(d.shape[0], -1), axis=-1)
 
 
+def _filter_valid(
+    thetas: jnp.ndarray, S: jnp.ndarray, xs: jnp.ndarray | None
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray | None]:
+    """Filter out invalid or extreme entries from (thetas, S, xs).
+
+    Conditions applied per row:
+      - all theta entries finite
+      - all summary entries finite
+      - all summary magnitudes below a large cap (1e20)
+    """
+    mask_theta = jnp.all(jnp.isfinite(thetas), axis=1)
+    mask_S = jnp.all(jnp.isfinite(S), axis=1)
+    S_MAX = jnp.asarray(1e20, dtype=S.dtype)
+    mask_mag = jnp.all(jnp.abs(S) < S_MAX, axis=1)
+    mask = mask_theta & mask_S & mask_mag
+
+    thetas = thetas[mask]
+    S = S[mask]
+    if xs is not None:
+        xs = xs[mask]
+    return thetas, S, xs
+
+
 def _make_dataset(
     spec: Any,
     key: Array,
@@ -51,7 +74,9 @@ def _make_dataset(
     @eqx.filter_jit  # compile two shapes at most (full and last partial)
     def _simulate_batch(th_keys: Array, sm_keys: Array) -> tuple[Array, Array, Array]:
         thetas_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, thetas_b)  # (B, n_obs)
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+            sm_keys, thetas_b
+        )  # (B, n_obs)
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
         return thetas_b, S_b, xs_b
 
@@ -72,17 +97,7 @@ def _make_dataset(
     S = jnp.concatenate(S_parts, axis=0)
     xs = jnp.concatenate(x_parts, axis=0) if x_parts is not None else None
 
-    mask_theta = jnp.all(jnp.isfinite(thetas), axis=1)
-    mask_S = jnp.all(jnp.isfinite(S), axis=1)
-    S_MAX = jnp.asarray(1e30, dtype=S.dtype)
-    mask_mag = jnp.all(jnp.abs(S) < S_MAX, axis=1)
-    # S = S.at[~mask_mag].set(jnp.clip(S[mask_mag], -S_MAX, S_MAX))
-    mask = mask_theta & mask_S & mask_mag
-
-    thetas = thetas[mask]
-    S = S[mask]
-    if xs is not None:
-        xs = xs[mask]
+    thetas, S, xs = _filter_valid(thetas, S, xs)
 
     print(f"jnp.max(S)={jnp.max(S)}, jnp.min(S)={jnp.min(S)}")
     print(f"Is nan: {jnp.sum(jnp.isnan(thetas))}")
@@ -117,7 +132,9 @@ def _abc_rejection_with_sim(
         th_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
 
         sm_keys = jax.vmap(lambda i: jax.random.fold_in(k_sm_base, i))(idx)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, th_b)
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+            sm_keys, th_b
+        )
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
 
         d_b = _to_vec(dist_fn(S_b, s_obs))  # (B,)
@@ -139,7 +156,11 @@ def _abc_rejection_with_sim(
     n_tot = int(d_all.shape[0])
 
     # Keep exactly n_keep: q in (0,1] => fraction; q>=1 => absolute count.
-    n_keep = max(1, min(n_tot, int(jnp.ceil(q * n_tot)))) if 0 < q <= 1.0 else max(1, min(n_tot, int(q)))
+    n_keep = (
+        max(1, min(n_tot, int(jnp.ceil(q * n_tot))))
+        if 0 < q <= 1.0
+        else max(1, min(n_tot, int(q)))
+    )
 
     idx = jnp.argpartition(d_all, n_keep - 1)[:n_keep]
     idx = idx[jnp.argsort(d_all[idx])]
@@ -165,7 +186,9 @@ def run_preconditioning(
     ``X_train`` may be ``None`` when ``run.precond.store_raw_data`` is ``False`` and
     the downstream posterior does not require raw simulations.
     """
-    sim_kwargs = {} if getattr(run, "sim_kwargs", None) is None else dict(run.sim_kwargs)
+    sim_kwargs = (
+        {} if getattr(run, "sim_kwargs", None) is None else dict(run.sim_kwargs)
+    )
     batch_size = int(getattr(run, "batch_size", 512))
     method = run.precond.method
     store_raw_requested = bool(getattr(run.precond, "store_raw_data", True))
@@ -191,7 +214,9 @@ def run_preconditioning(
     if method == "none":
         key, k_data = jax.random.split(key)
         if needs_raw_global and not store_raw_requested:
-            print("Preconditioning: overriding store_raw_data=True for NPE-RS posterior")
+            print(
+                "Preconditioning: overriding store_raw_data=True for NPE-RS posterior"
+            )
         store_raw = store_raw_requested or needs_raw_global
         theta_train, S_train, x_train = _make_dataset(
             spec,
@@ -271,17 +296,19 @@ def run_preconditioning(
         )
         print("made dataset")
         # Train forests and get weights
-        S_mean = S_all.mean(axis=0)
-        S_std = S_all.std(axis=0)
-        S_all_w = (S_all - S_mean) / (S_std + 1e-8)
-        s_obs_w = (s_obs - S_mean) / (S_std + 1e-8)
-        theta_all, S_all, diag = abc_rf_select(S=S_all, theta=theta_all, s_obs=s_obs, cfg=run.precond)
+        # S_mean = S_all.mean(axis=0)
+        # S_std = S_all.std(axis=0)
+        # S_all_w = (S_all - S_mean) / (S_std + 1e-8)
+        # s_obs_w = (s_obs - S_mean) / (S_std + 1e-8)
+        theta_all, S_all, diag = abc_rf_select(
+            S=S_all, theta=theta_all, s_obs=s_obs, cfg=run.precond
+        )
 
         w = np.asarray(diag["weights"], dtype=np.float64)
         w = np.clip(w, 0.0, None)
         w /= w.sum() + 1e-12
 
-        RF_ABC_WEIGHT_TEMPERATURE = 1.0
+        # RF_ABC_WEIGHT_TEMPERATURE = 0.5
         temperature = RF_ABC_WEIGHT_TEMPERATURE
         if temperature <= 0:
             raise ValueError("RF_ABC_WEIGHT_TEMPERATURE must be positive.")
@@ -296,6 +323,12 @@ def run_preconditioning(
             if 0 < run.precond.q_precond <= 1.0
             else int(min(w.size, run.precond.q_precond))
         )
+        # num_nonzero_weights = np.count_nonzero(w)
+        # keep = int(min(keep, num_nonzero_weights))
+        # if num_nonzero_weights < keep:
+        #     print(
+        #         f"Warning: only {num_nonzero_weights} samples have nonzero weight; reducing keep={keep} accordingly."
+        #     )
         rng_np = np.random.default_rng(run.precond.rf_random_state)
         # NOTE: gone with False here ... priority is just to get a decent set for training
         # not posterior approximation.
@@ -306,14 +339,25 @@ def run_preconditioning(
         S_sel = S_all[idx]
         X_sel = X_all[idx] if X_all is not None else None  # unused by RNPE
         print("median theta", jnp.median(theta_sel, axis=0))
+        print("Sel std", jnp.std(S_sel, axis=0))
 
         theta_lo_raw = getattr(spec, "theta_lo", None)
         theta_hi_raw = getattr(spec, "theta_hi", None)
-        theta_lo = jnp.asarray(theta_lo_raw, dtype=theta_sel.dtype) if theta_lo_raw is not None else None
-        theta_hi = jnp.asarray(theta_hi_raw, dtype=theta_sel.dtype) if theta_hi_raw is not None else None
+        theta_lo = (
+            jnp.asarray(theta_lo_raw, dtype=theta_sel.dtype)
+            if theta_lo_raw is not None
+            else None
+        )
+        theta_hi = (
+            jnp.asarray(theta_hi_raw, dtype=theta_sel.dtype)
+            if theta_hi_raw is not None
+            else None
+        )
         # Identify all but the first occurrence for each duplicated θ row.
         theta_sel_np = np.asarray(theta_sel)
-        _, inverse, counts = np.unique(theta_sel_np, axis=0, return_inverse=True, return_counts=True)
+        _, inverse, counts = np.unique(
+            theta_sel_np, axis=0, return_inverse=True, return_counts=True
+        )
         dup_indices: list[int] = []
         for label, count in enumerate(counts):
             if count > 1:
@@ -327,8 +371,10 @@ def run_preconditioning(
             if theta_lo is not None and theta_hi is not None:
                 range_scale = jnp.maximum(theta_hi - theta_lo, 1e-6)
                 th_scale = jnp.minimum(th_scale, range_scale)
-            jitter_scale = 1e-1 * th_scale
-            jitter_noise = jax.random.normal(k_jitter, theta_sel[dup_idx_arr].shape, dtype=theta_sel.dtype)
+            jitter_scale = 1e-2 * th_scale
+            jitter_noise = jax.random.normal(
+                k_jitter, theta_sel[dup_idx_arr].shape, dtype=theta_sel.dtype
+            )
             theta_sel = theta_sel.at[dup_idx_arr].add(jitter_noise * jitter_scale)
             if theta_lo is not None and theta_hi is not None:
                 theta_sel = jnp.clip(theta_sel, theta_lo, theta_hi)
@@ -339,39 +385,12 @@ def run_preconditioning(
         # Re-simulate so S reflects any jittered θ draws.
         key, k_resim = jax.random.split(key)
         sim_keys = jax.random.split(k_resim, theta_sel.shape[0])
-        X_sel = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sim_keys, theta_sel)
+        X_sel = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+            sim_keys, theta_sel
+        )
         S_sel = jax.vmap(spec.summaries)(X_sel)
-        # # --- jitter AFTER selection ---
-        # key, k_th, k_s = jax.random.split(key, 3)
-
-        # # theta jitter: prefer prior-range scale; else sample std
-        # jitter_scale = 1e-1
-        # th_lo = getattr(spec, "theta_lo", None)
-        # th_hi = getattr(spsec, "theta_hi", None)
-        # # if th_lo is not None and th_hi is not None:
-        # #     th_scale = jitter_scale * (jnp.asarray(th_hi) - jnp.asarray(th_lo))
-        # # else:
-        # th_scale = jitter_scale * (jnp.std(theta_sel, axis=0) + 1e-8)
-        # print("th_scale", th_scale)
-        # theta_sel = (
-        #     theta_sel
-        #     + jax.random.normal(k_th, theta_sel.shape, dtype=theta_sel.dtype) * th_scale
-        # )
-        # if th_lo is not None and th_hi is not None:
-        #     theta_sel = jnp.clip(theta_sel, jnp.asarray(th_lo), jnp.asarray(th_hi))
-
-        # TODO: TESTING, OPTIONAL
-        # key, k_resim = jax.random.split(key)
-        # keys = jax.random.split(k_resim, theta_sel.shape[0])
-        # X_sel = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
-        #     keys, theta_sel
-        # )
-        # S_sel = jax.vmap(spec.summaries)(X_sel)
-
-        # # S jitter: cap scale to avoid runaway summaries
-        # s_std = jnp.std(S_sel, axis=0)
-        # s_scale = jitter_scale * jnp.minimum(s_std, jnp.ones_like(s_std))
-        # S_sel = S_sel + jax.random.normal(k_s, S_sel.shape, dtype=S_sel.dtype) * s_scale
+        # Apply the same validity filtering after re-simulation
+        theta_sel, S_sel, X_sel = _filter_valid(theta_sel, S_sel, X_sel)
 
         ESS = float(1.0 / (w**2).sum())
         uniq = int(np.unique(idx).size)

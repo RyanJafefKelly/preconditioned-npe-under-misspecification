@@ -18,14 +18,17 @@ def _fit_rf_multi(S_np: np.ndarray, th_np: np.ndarray, cfg: Any) -> tuple[Any, f
         max_features=1.0,
         n_jobs=cfg.rf_n_jobs,
         random_state=cfg.rf_random_state,
-        min_samples_split=2 * cfg.rf_min_leaf,  # avoid splits that create leaves smaller than min_samples_leaf
+        min_samples_split=2
+        * cfg.rf_min_leaf,  # avoid splits that create leaves smaller than min_samples_leaf
         min_impurity_decrease=1e-6,
     )
     rf.fit(S_np, th_np)  # multi‑output
     return rf, float(getattr(rf, "oob_score_", np.nan))
 
 
-def _fit_rf_per_param(S_np: np.ndarray, th_np: np.ndarray, cfg: Any) -> tuple[list[Any], float]:
+def _fit_rf_per_param(
+    S_np: np.ndarray, th_np: np.ndarray, cfg: Any
+) -> tuple[list[Any], float]:
     models, oobs = [], []
     for j in range(th_np.shape[1]):
         rf = RandomForestRegressor(
@@ -38,6 +41,9 @@ def _fit_rf_per_param(S_np: np.ndarray, th_np: np.ndarray, cfg: Any) -> tuple[li
             max_features=1.0,
             n_jobs=cfg.rf_n_jobs,
             random_state=cfg.rf_random_state + j,
+            min_samples_split=2
+            * cfg.rf_min_leaf,  # avoid splits that create leaves smaller than min_samples_leaf
+            min_impurity_decrease=1e-6,
         )
         rf.fit(S_np, th_np[:, j])
         models.append(rf)
@@ -45,7 +51,9 @@ def _fit_rf_per_param(S_np: np.ndarray, th_np: np.ndarray, cfg: Any) -> tuple[li
     return models, float(np.nanmean(oobs))
 
 
-def _qrf_weights_multi(rf: RandomForestRegressor, S_np: np.ndarray, s_obs_np: np.ndarray) -> np.ndarray:
+def _qrf_weights_multi(
+    rf: RandomForestRegressor, S_np: np.ndarray, s_obs_np: np.ndarray
+) -> np.ndarray:
     B = len(rf.estimators_)
     w = np.zeros(S_np.shape[0], dtype=np.float64)
     obs_leaf = rf.apply(s_obs_np[None, :]).ravel()  # (B,)
@@ -59,7 +67,9 @@ def _qrf_weights_multi(rf: RandomForestRegressor, S_np: np.ndarray, s_obs_np: np
     return w
 
 
-def _qrf_weights_per_param(models: list[Any], S_np: np.ndarray, s_obs_np: np.ndarray) -> np.ndarray:
+def _qrf_weights_per_param(
+    models: list[Any], S_np: np.ndarray, s_obs_np: np.ndarray
+) -> np.ndarray:
     B = sum(len(m.estimators_) for m in models)
     w = np.zeros(S_np.shape[0], dtype=np.float64)
     for rf in models:
