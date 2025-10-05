@@ -20,14 +20,14 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 # Preconditioning: RF-ABC
 # ---------------------------
 : "${N_SIMS:=20000}"
-: "${Q_PRECOND:=0.2}"
+: "${Q_PRECOND:=0.1}"
 : "${PRECOND_METHOD:=rf_abc}"     # rf_abc|rejection|smc_abc|none
 
 # RF-ABC knobs
-: "${ABC_RF_MODE:=multi}"         # multi|per_param
+: "${ABC_RF_MODE:=per_param}"         # multi|per_param
 : "${RF_N_ESTIMATORS:=800}"
-: "${RF_MIN_LEAF:=25}"
-: "${RF_MAX_DEPTH:=12}"           # empty => None (use default)
+: "${RF_MIN_LEAF:=40}"
+: "${RF_MAX_DEPTH:=10}"           # empty => None (use default)
 : "${RF_TRAIN_FRAC:=1.0}"
 : "${RF_RANDOM_STATE:=$SEED}"
 : "${RF_N_JOBS:=-1}"

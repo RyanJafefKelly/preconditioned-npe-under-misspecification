@@ -26,10 +26,10 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 : "${PRECOND_METHOD:=rf_abc}"     # rf_abc|rejection|smc_abc|none
 
 # RF-ABC knobs
-: "${ABC_RF_MODE:=multi}"         # multi|per_param
+: "${ABC_RF_MODE:=per_param}"         # multi|per_param
 : "${RF_N_ESTIMATORS:=800}"
-: "${RF_MIN_LEAF:=25}"
-: "${RF_MAX_DEPTH:=12}"           # empty => None (use default)
+: "${RF_MIN_LEAF:=40}"
+: "${RF_MAX_DEPTH:=10}"           # empty => None (use default)
 : "${RF_TRAIN_FRAC:=1.0}"
 : "${RF_RANDOM_STATE:=$SEED}"
 : "${RF_N_JOBS:=-1}"
@@ -46,7 +46,7 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 : "${LAPLACE_ALPHA:=0.3}"; : "${LAPLACE_MIN_SCALE:=0.01}"
 : "${STUDENT_T_SCALE:=0.05}"; : "${STUDENT_T_DF:=1.0}"
 : "${CAUCHY_SCALE:=0.05}"; : "${SPIKE_STD:=0.01}"; : "${SLAB_SCALE:=0.25}"
-: "${MISSPECIFIED_PROB:=0.5}"; : "${LEARN_PROB:=1}"
+: "${MISSPECIFIED_PROB:=0.5}"; : "${LEARN_PROB:=0}"
 
 # MCMC
 : "${MCMC_WARMUP:=1000}"; : "${MCMC_SAMPLES:=2000}"; : "${MCMC_THIN:=1}"
@@ -59,12 +59,12 @@ GROUP="th_$(printf 'k%s_lam%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-obs_${OBS_MODEL
 OUTDIR="results/contaminated_weibull/rf_abc_rnpe/${GROUP}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
 
-LEARN_FLAG=()
-if [[ "${LEARN_PROB}" == "1" || "${LEARN_PROB,,}" == "true" ]]; then
-  LEARN_FLAG+=( --robust.learn_prob )
-else
-  LEARN_FLAG+=( --no-robust.learn_prob )
-fi
+# LEARN_FLAG=()
+# if [[ "${LEARN_PROB}" == "1" || "${LEARN_PROB,,}" == "true" ]]; then
+#   LEARN_FLAG+=( --robust.learn_prob )
+# else
+#   LEARN_FLAG+=( --no-robust.learn_prob )
+# fi
 
 cmd=(uv run python -m precond_npe_misspec.pipelines.contaminated_weibull
   --seed "$SEED" --obs_seed "$((10#$SEED + 1234))" --outdir "$OUTDIR"
@@ -84,7 +84,7 @@ cmd=(uv run python -m precond_npe_misspec.pipelines.contaminated_weibull
   --robust.laplace_alpha "$LAPLACE_ALPHA" --robust.laplace_min_scale "$LAPLACE_MIN_SCALE"
   --robust.student_t_scale "$STUDENT_T_SCALE" --robust.student_t_df "$STUDENT_T_DF"
   --robust.cauchy_scale "$CAUCHY_SCALE" --robust.spike_std "$SPIKE_STD" --robust.slab_scale "$SLAB_SCALE"
-  --robust.misspecified_prob "$MISSPECIFIED_PROB" "${LEARN_FLAG[@]}"
+  --robust.misspecified_prob "$MISSPECIFIED_PROB"  # "${LEARN_FLAG[@]}"
   --robust.mcmc_warmup "$MCMC_WARMUP" --robust.mcmc_samples "$MCMC_SAMPLES" --robust.mcmc_thin "$MCMC_THIN"
 
   # Flow

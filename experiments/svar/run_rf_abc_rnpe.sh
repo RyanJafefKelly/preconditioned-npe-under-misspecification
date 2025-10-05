@@ -21,10 +21,10 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 : "${PRECOND_METHOD:=rf_abc}"     # rf_abc|rejection|smc_abc|none
 
 # RF-ABC knobs
-: "${ABC_RF_MODE:=multi}"         # multi|per_param
+: "${ABC_RF_MODE:=per_param}"         # multi|per_param
 : "${RF_N_ESTIMATORS:=800}"
-: "${RF_MIN_LEAF:=25}"
-: "${RF_MAX_DEPTH:=12}"             # empty => None (use default)
+: "${RF_MIN_LEAF:=40}"
+: "${RF_MAX_DEPTH:=10}"             # empty => None (use default)
 : "${RF_TRAIN_FRAC:=1.0}"
 : "${RF_RANDOM_STATE:=$SEED}"
 : "${RF_N_JOBS:=-1}"
@@ -41,7 +41,7 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 : "${LAPLACE_ALPHA:=0.3}"; : "${LAPLACE_MIN_SCALE:=0.01}"
 : "${STUDENT_T_SCALE:=0.05}"; : "${STUDENT_T_DF:=1.0}"
 : "${CAUCHY_SCALE:=0.05}"; : "${SPIKE_STD:=0.01}"; : "${SLAB_SCALE:=0.25}"
-: "${MISSPECIFIED_PROB:=0.5}"; : "${LEARN_PROB:=1}"
+: "${MISSPECIFIED_PROB:=0.5}"; : "${LEARN_PROB:=0}"
 
 # MCMC
 : "${MCMC_WARMUP:=1000}"; : "${MCMC_SAMPLES:=2000}"; : "${MCMC_THIN:=1}"
