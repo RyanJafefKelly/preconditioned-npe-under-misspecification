@@ -15,7 +15,7 @@ def _fit_rf_multi(S_np: np.ndarray, th_np: np.ndarray, cfg: Any) -> tuple[Any, f
         max_depth=cfg.rf_max_depth,
         bootstrap=True,
         oob_score=True,
-        max_features=1.0,
+        max_features="sqrt",
         n_jobs=cfg.rf_n_jobs,
         random_state=cfg.rf_random_state,
         min_samples_split=2 * cfg.rf_min_leaf,  # avoid splits that create leaves smaller than min_samples_leaf

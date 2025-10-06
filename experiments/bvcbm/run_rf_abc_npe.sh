@@ -4,6 +4,8 @@ set -euo pipefail
 export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 DATE=$(date +"%Y%m%d-%H%M%S")
 
+: "${METHOD:=rf_abc_npe}"
+
 : "${SEED:=0}"
 : "${T:=32}"
 : "${START_VOLUME:=50.0}"
@@ -11,6 +13,8 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 : "${SUMMARY:=identity}"           # log|identity
 : "${OBS_MODEL:=real}"             # synthetic|real
 : "${EMBEDDER:=asv_tcn}"
+: "${DATASET:=pancreatic}"
+: "${PATIENT_IDX:=0}"
 
 THETA_DEFAULT="0.05 0.01 30.0 48.0 0.04 0.008 30.0 48.0 7.0"
 THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
@@ -41,13 +45,10 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 
 th_parts=(); for i in "${!THETA_ARR[@]}"; do th_parts+=("p$((i+1))${THETA_ARR[$i]}"); done
 THETA_TAG=$(IFS=_; echo "${th_parts[*]}")
-
-RF_TAG="mode_${ABC_RF_MODE}-nest_${RF_N_ESTIMATORS}-leaf_${RF_MIN_LEAF}"
-[[ -n "${RF_MAX_DEPTH}" ]] && RF_TAG="${RF_TAG}-depth_${RF_MAX_DEPTH}"
-[[ "${RF_TRAIN_FRAC}" != "1.0" ]] && RF_TAG="${RF_TAG}-tfrac_${RF_TRAIN_FRAC}"
-
-GROUP="th_${THETA_TAG}-T_${T}-sum_${SUMMARY}-page_${PAGE}-obs_${OBS_MODEL}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
-OUTDIR="results/bvcbm/rf_abc_npe/${GROUP}/seed-${SEED}/${DATE}"; mkdir -p "$OUTDIR"
+RUN_TAG="ds_${DATASET}-p${PATIENT_IDX}-T_${T}"
+GROUP="${RUN_TAG}-th_${THETA_TAG}-sum_${SUMMARY}-page_${PAGE}-obs_${OBS_MODEL}-n_sims_${N_SIMS}"
+OUTDIR="results/bvcbm/${METHOD}/${GROUP}/seed-${SEED}/${DATE}"
+mkdir -p "$OUTDIR"
 
 cmd=(uv run python -m precond_npe_misspec.pipelines.bvcbm
   --seed "$SEED" --obs_seed "$((10#$SEED + 1234))" --outdir "$OUTDIR"
@@ -68,6 +69,7 @@ cmd=(uv run python -m precond_npe_misspec.pipelines.bvcbm
   --flow.flow_layers "$FLOW_LAYERS" --flow.nn_width "$NN_WIDTH" --flow.knots "$KNOTS" --flow.interval "$INTERVAL"
   --flow.learning_rate "$LEARNING_RATE" --flow.max_epochs "$MAX_EPOCHS" --flow.max_patience "$MAX_PATIENCE" --flow.batch_size "$BATCH_SIZE"
 )
+cmd+=( --dataset "$DATASET" --patient_idx "$PATIENT_IDX" )
 
 # Optional RF max depth
 if [[ -n "${RF_MAX_DEPTH}" ]]; then

@@ -4,6 +4,8 @@ set -euo pipefail
 export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 DATE=$(date +"%Y%m%d-%H%M%S")
 
+: "${METHOD:=prnpe}"
+
 : "${SEED:=0}"
 : "${T:=32}"
 : "${START_VOLUME:=50.0}"
@@ -11,6 +13,8 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 : "${SUMMARY:=identity}"           # log|identity
 : "${OBS_MODEL:=real}"   # synthetic|real
 : "${EMBEDDER:=asv_tcn}"
+: "${DATASET:=pancreatic}"
+: "${PATIENT_IDX:=0}"
 
 THETA_DEFAULT="0.05 0.01 30.0 48.0 0.04 0.008 30.0 48.0 7.0"
 THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
@@ -31,15 +35,17 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 : "${LAPLACE_ALPHA:=0.3}"; : "${LAPLACE_MIN_SCALE:=0.01}"
 : "${STUDENT_T_SCALE:=0.05}"; : "${STUDENT_T_DF:=1.0}"
 : "${CAUCHY_SCALE:=0.05}"; : "${SPIKE_STD:=0.01}"; : "${SLAB_SCALE:=0.25}"
-: "${MISSPECIFIED_PROB:=0.5}"; : "${LEARN_PROB:=1}"
+: "${MISSPECIFIED_PROB:=0.5}"; : "${LEARN_PROB:=0}"
 
 # MCMC inside RNPE
 : "${MCMC_WARMUP:=1000}"; : "${MCMC_SAMPLES:=2000}"; : "${MCMC_THIN:=1}"
 
 th_parts=(); for i in "${!THETA_ARR[@]}"; do th_parts+=("p$((i+1))${THETA_ARR[$i]}"); done
 THETA_TAG=$(IFS=_; echo "${th_parts[*]}")
-GROUP="th_${THETA_TAG}-T_${T}-sum_${SUMMARY}-page_${PAGE}-obs_${OBS_MODEL}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
-OUTDIR="results/bvcbm/prnpe/${GROUP}/seed-${SEED}/${DATE}"; mkdir -p "$OUTDIR"
+RUN_TAG="ds_${DATASET}-p${PATIENT_IDX}-T_${T}"
+GROUP="${RUN_TAG}-th_${THETA_TAG}-sum_${SUMMARY}-page_${PAGE}-obs_${OBS_MODEL}-n_sims_${N_SIMS}"
+OUTDIR="results/bvcbm/${METHOD}/${GROUP}/seed-${SEED}/${DATE}"
+mkdir -p "$OUTDIR"
 
 cmd=(uv run python -m precond_npe_misspec.pipelines.bvcbm
   --seed "$SEED" --obs_seed "$((10#$SEED + 1234))" --outdir "$OUTDIR"
@@ -60,6 +66,7 @@ cmd=(uv run python -m precond_npe_misspec.pipelines.bvcbm
   --flow.flow_layers "$FLOW_LAYERS" --flow.nn_width "$NN_WIDTH" --flow.knots "$KNOTS" --flow.interval "$INTERVAL"
   --flow.learning_rate "$LEARNING_RATE" --flow.max_epochs "$MAX_EPOCHS" --flow.max_patience "$MAX_PATIENCE" --flow.batch_size "$BATCH_SIZE"
 )
+cmd+=( --dataset "$DATASET" --patient_idx "$PATIENT_IDX" )
 if [[ "${LEARN_PROB}" == "1" ]]; then cmd+=(--robust.learn_prob); fi
 
 printf '%q ' "${cmd[@]}" | tee "${OUTDIR}/cmd.txt"; echo

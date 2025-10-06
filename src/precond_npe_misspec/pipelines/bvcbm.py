@@ -47,6 +47,8 @@ class Config:
     T: int = 19
     start_volume: float = 50.0
     page: int = 5
+    dataset: Literal["breast", "pancreatic"] = "pancreatic"
+    patient_idx: int = 0  # 0..3
 
     # (p0_1, psc_1, dmax_1, gage_1[h], p0_2, psc_2, dmax_2, gage_2[h], tau[days])
     theta_true: tuple[float, float, float, float, float, float, float, float, float] = (
@@ -219,34 +221,33 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
 
 
 # ---------- CLI ----------
-def _load_real_observations(T: int) -> jnp.ndarray:
-    try:
-        from scipy.io import loadmat
-    except ImportError as exc:  # pragma: no cover - dependency check
-        raise ImportError("scipy is required for obs_model='real'") from exc
+def _load_real_observations(T: int, *, dataset: str, patient_idx: int) -> jnp.ndarray:
+    from scipy.io import loadmat
 
-    data_path = Path(__file__).resolve().parents[2] / "precond_npe_misspec" / "data" / "CancerDatasets.mat"
+    mat_path = os.getenv("CANCER_DATASETS_MAT")
+    if mat_path:
+        data_path = Path(mat_path)
+    else:
+        data_path = Path(__file__).resolve().parents[2] / "precond_npe_misspec" / "data" / "CancerDatasets.mat"
     if not data_path.exists():
         raise FileNotFoundError(f"Missing real data file at {data_path}")
 
+    key = {"breast": "Breast_data", "pancreatic": "Pancreatic_data"}[dataset.lower()]
     mat = loadmat(data_path, squeeze_me=True)
-    breast_data = mat.get("Breast_data")
-    if breast_data is None:
-        raise KeyError("'Breast_data' missing from CancerDatasets.mat")
-
-    control_growth = np.asarray(breast_data, dtype=float)
-    if control_growth.shape[0] < T:
-        raise ValueError(f"Requested T={T} exceeds available samples {control_growth.shape[0]}")
-    if control_growth.ndim < 2 or control_growth.shape[1] <= 3:
-        raise ValueError("Unexpected shape for Breast_data; expected at least four columns")
-
-    series = np.squeeze(control_growth[:T, 3])
+    arr = np.asarray(mat.get(key), dtype=float)
+    if arr is None:
+        raise KeyError(f"'{key}' missing from {data_path.name}")
+    if arr.ndim < 2 or patient_idx >= arr.shape[1]:
+        raise ValueError(f"Unexpected shape for {key}; need ≥4 columns, got {arr.shape}")
+    if T > arr.shape[0]:
+        raise ValueError(f"T={T} exceeds available samples {arr.shape[0]}")
+    series = np.squeeze(arr[:T, patient_idx])
     return jnp.asarray(series, dtype=jnp.float32)
 
 
 def main(cfg: Config) -> None:
     if cfg.obs_model == "real":
-        y_obs = _load_real_observations(cfg.T)
+        y_obs = _load_real_observations(cfg.T, dataset=cfg.dataset, patient_idx=cfg.patient_idx)
         T_sim = int(y_obs.shape[0])
     else:
         y_obs = None

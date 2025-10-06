@@ -72,15 +72,22 @@ R_TOTAL=$((R * M))
 MID=$(( IDX / R ))
 RID=$(( IDX % R ))
 METHOD="${METHODS[$MID]}"
+: "${DATASET:=pancreatic}"
+: "${PATIENT_IDX:=0}"
+: "${T:=32}"
+
 export SEED="$RID"
 export OBS_SEED="$(( SEED + OBS_SEED_OFFSET ))"
 
 echo "[env] host=$(hostname) jobid=${PBS_JOBID} idx=${IDX} method=${METHOD} rep=${RID} workers=${BVCBM_WORKERS}"
-mkdir -p logs/bvcbm results/_done
+RUN_TAG="ds_${DATASET}-p${PATIENT_IDX}-T_${T}"
+mkdir -p "logs/bvcbm/${RUN_TAG}" "results/_done"
 
 case "$METHOD" in
-  npe|pnpe|prnpe|rnpe|rf_abc_npe|rf_abc_rnpe) bash "experiments/bvcbm/run_${METHOD}.sh" 2>&1 | tee "logs/bvcbm/${METHOD}_rep${RID}.log" ;;
+  npe|pnpe|prnpe|rnpe|rf_abc_npe|rf_abc_rnpe)
+    bash "experiments/bvcbm/run_${METHOD}.sh" 2>&1 | tee "logs/bvcbm/${RUN_TAG}/${METHOD}_rep${RID}.log"
+    ;;
   *) echo "Unknown method: $METHOD" >&2; exit 3 ;;
 esac
 
-echo "$(date) method=$METHOD rep=$RID ok" > "results/_done/bvcbm_${METHOD}_rep${RID}.ok"
+echo "$(date) method=$METHOD rep=${RID} ${RUN_TAG} ok" > "results/_done/bvcbm_${RUN_TAG}_${METHOD}_rep${RID}.ok"
