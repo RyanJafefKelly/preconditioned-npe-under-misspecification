@@ -38,13 +38,17 @@ svar_set_method_env "$METHOD"
 echo "[env] host=$(hostname) jobid=${PBS_JOBID} idx=${IDX} method=${METHOD} rep=${RID}"
 mkdir -p "logs/svar"
 
-printf 'METHOD raw: [%s]\n' "$METHOD"
-printf 'METHOD hex:'; printf '%s' "$METHOD" | od -An -tx1
-
-
 # Run the selected method (pass through env overrides)
 case "$METHOD" in
-  rf_abc_npe|rf_abc_rnpe|npe|rnpe|pnpe|prnpe) : ;;
+  rf_abc_npe|rf_abc_rnpe|npe|rnpe|pnpe|prnpe)
+    SCRIPT="experiments/svar/run_${METHOD}.sh"
+    if [[ ! -f "$SCRIPT" ]]; then
+      echo "Missing script: $SCRIPT" >&2
+      exit 4
+    fi
+    # Execute and tee logs
+    bash "$SCRIPT" 2>&1 | tee "${LOG_DIR}/${METHOD}_rep${RID}.log"
+    ;;
   *) echo "Unknown method: [$METHOD]" >&2; exit 3 ;;
 esac
 
