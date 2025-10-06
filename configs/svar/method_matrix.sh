@@ -93,6 +93,16 @@ svar_set_method_env() {
       export POSTERIOR_METHOD="rnpe"
       export THETA_TARGET="${THETA_TARGET_OVERRIDE:-$THETA_TRUE}"
       ;;
+    rf_abc_npe)
+      export PRECOND_METHOD="rf_abc"
+      export POSTERIOR_METHOD="npe"
+      export THETA_TARGET="${THETA_TARGET_OVERRIDE:-$THETA_TRUE}"
+      ;;
+    rf_abc_rnpe)
+      export PRECOND_METHOD="rf_abc"
+      export POSTERIOR_METHOD="rnpe"
+      export THETA_TARGET="${THETA_TARGET_OVERRIDE:-$THETA_TRUE}"
+      ;;
     *)
       echo "Unknown method: $method" >&2; return 3;;
   esac
