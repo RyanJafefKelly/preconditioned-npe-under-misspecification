@@ -37,6 +37,7 @@ svar_set_method_env "$METHOD"
 
 echo "[env] host=$(hostname) jobid=${PBS_JOBID} idx=${IDX} method=${METHOD} rep=${RID}"
 mkdir -p "logs/svar"
+LOG_DIR="logs/svar"
 
 # Run the selected method (pass through env overrides)
 case "$METHOD" in
