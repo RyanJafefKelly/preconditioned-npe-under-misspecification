@@ -32,6 +32,7 @@ class Args:
 
 # _METHODS_ORDER = ("npe", "pnpe", "rnpe", "prnpe", "npe_rs", "pnpe_rs")
 _METHODS_ORDER = ("npe", "pnpe", "rnpe", "prnpe", "rf_abc_npe", "rf_abc_rnpe")
+_ALLOWED = set(_METHODS_ORDER)
 _TS_PAT = re.compile(r"^\d{8}-\d{6}$")
 
 
@@ -44,10 +45,11 @@ def _example_name_from_root(root: Path) -> str:
 
 
 def _discover_methods(root: Path) -> list[str]:
-    cand = [p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith("_")]
-    ordered = [m for m in _METHODS_ORDER if m in cand]
-    extras = [m for m in cand if m not in ordered]
-    return ordered + sorted(extras)
+    cand = [p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith("_") and p.name in _ALLOWED]
+    missing = [m for m in _METHODS_ORDER if m not in cand]
+    if missing:
+        print(f"[warn] missing method dirs: {missing}")
+    return [m for m in _METHODS_ORDER if m in cand]
 
 
 def _pick_group_for_method(method_dir: Path, group_hint: str | None) -> str:
