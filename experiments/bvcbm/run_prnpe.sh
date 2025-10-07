@@ -8,7 +8,7 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 
 : "${SEED:=0}"
 : "${T:=32}"
-: "${START_VOLUME:=50.0}"
+: "${START_VOLUME:=100.0}"
 : "${PAGE:=5}"
 : "${SUMMARY:=identity}"           # log|identity
 : "${OBS_MODEL:=real}"   # synthetic|real
@@ -16,9 +16,9 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 : "${DATASET:=pancreatic}"
 : "${PATIENT_IDX:=0}"
 
-THETA_DEFAULT="0.05 0.01 30.0 48.0 0.04 0.008 30.0 48.0 7.0"
+THETA_DEFAULT="200.0 12.0 50.0"
 THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
-(( ${#THETA_ARR[@]} == 9 )) || { echo "need 9 values for THETA"; exit 1; }
+(( ${#THETA_ARR[@]} == 3 )) || { echo "need 3 values for THETA"; exit 1; }
 
 # ABC preconditioning (SMC-ABC)
 : "${N_SIMS:=20000}"; : "${Q_PRECOND:=0.2}"; : "${PRECOND_METHOD:=smc_abc}"

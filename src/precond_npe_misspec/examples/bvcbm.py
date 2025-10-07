@@ -18,6 +18,11 @@ class SimFn(Protocol):
     def __call__(self, theta: Iterable[float], seed: int) -> np.ndarray: ...
 
 
+_P0_CONST: float = 1.0
+_PSC_CONST: float = 0.0
+_DMAX_CONST: float = 17.3  # cast to int(round(.)) for simulator
+_PAGE_CONST: int = 5
+
 _SIM_FN: SimFn | None = None  # set in initializer
 
 
@@ -50,22 +55,40 @@ def simulator_monophasic(T: int, start_volume: float = 50.0, page: int = 5) -> S
     return f
 
 
-def simulator_biphasic(T: int, start_volume: float = 50.0, page: int = 5) -> SimFn:
+def simulator_biphasic(
+    T: int, start_volume: float = 100.0, page: int = _PAGE_CONST
+) -> SimFn:
     """theta = (p0_1, psc_1, dmax_1, gage_1, p0_2, psc_2, dmax_2, gage_2, tau)."""
     if not hasattr(tm, "simulate_biphasic"):
-        raise RuntimeError("tumourmodel.simulate_biphasic missing; add binding in tumourmodel-py")
+        raise RuntimeError(
+            "tumourmodel.simulate_biphasic missing; add binding in tumourmodel-py"
+        )
 
     def f(theta: Iterable[float], seed: int) -> np.ndarray:
-        p0_1, psc_1, dmax_1, gage_1, p0_2, psc_2, dmax_2, gage_2, tau = [float(x) for x in theta]
+        gage1, tau_days, gage2 = [float(x) for x in theta]
+        th1 = [
+            _P0_CONST,
+            _PSC_CONST,
+            int(round(_DMAX_CONST)),
+            int(round(gage1)),
+            int(page),
+        ]
+        th2 = [
+            _P0_CONST,
+            _PSC_CONST,
+            int(round(_DMAX_CONST)),
+            int(round(gage2)),
+            int(page),
+        ]
         result = tm.simulate_biphasic(
-            [p0_1, psc_1, int(round(dmax_1)), int(round(gage_1)), int(page)],
-            [p0_2, psc_2, int(round(dmax_2)), int(round(gage_2)), int(page)],
-            int(round(tau)),
+            th1,
+            th2,
+            int(round(tau_days)),
             T=T,
             seed=int(seed),
             start_volume=float(start_volume),
         )
-        return np.asarray(result)
+        return np.asarray(result, dtype=np.float32)
 
     return f
 
@@ -87,23 +110,36 @@ def theta_bounds_monophasic(T: int) -> tuple[jnp.ndarray, jnp.ndarray]:
     return lo, hi
 
 
+# def theta_bounds_biphasic(T: int) -> tuple[jnp.ndarray, jnp.ndarray]:
+#     lo = jnp.array(
+#         [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 2.0],
+#         dtype=jnp.float32,
+#     )
+#     hi = jnp.array(
+#         [
+#             1.0,
+#             1.0,
+#             50.0,
+#             24.0 * float(T),
+#             1.0,
+#             1.0,
+#             50.0,
+#             24.0 * float(T),
+#             float(T - 1),
+#         ],
+#         dtype=jnp.float32,
+#     )
+#     return lo, hi
+
+
 def theta_bounds_biphasic(T: int) -> tuple[jnp.ndarray, jnp.ndarray]:
-    lo = jnp.array(
-        [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 2.0],
-        dtype=jnp.float32,
-    )
+    """
+    Bounds for (gage1[h], tau[days], gage2[h]).
+    Paper: gage in [2, 24*T-1], tau in [2, T-1].
+    """
+    lo = jnp.array([1.0, 2.0, 1.0], dtype=jnp.float32)
     hi = jnp.array(
-        [
-            1.0,
-            1.0,
-            50.0,
-            24.0 * float(T),
-            1.0,
-            1.0,
-            50.0,
-            24.0 * float(T),
-            float(T - 1),
-        ],
+        [24.0 * float(T) - 1.0, float(T - 1), 24.0 * float(T) - 1.0],
         dtype=jnp.float32,
     )
     return lo, hi
@@ -130,7 +166,9 @@ def simulate(
 ) -> jax.Array:
     """Monophasic adaptor (kept for completeness)."""
     fn = simulator_monophasic(T=T, start_volume=start_volume, page=page)
-    seed = int(jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32)))
+    seed = int(
+        jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32))
+    )
     return jnp.asarray(fn(theta, seed), dtype=jnp.float32)
 
 
@@ -139,12 +177,14 @@ def simulate_biphasic(
     theta: jax.Array,
     *,
     T: int,
-    start_volume: float = 50.0,
-    page: int = 5,
+    start_volume: float = 100.0,
+    page: int = _PAGE_CONST,
 ) -> jax.Array:
-    """Biphasic adaptor used by pipeline simulate_path. Not for use under jit/vmap."""
+    """Biphasic adaptor for 3‑parameter theta. Not for use under jit/vmap."""
     fn = simulator_biphasic(T=T, start_volume=start_volume, page=page)
-    seed = int(jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32)))
+    seed = int(
+        jax.device_get(jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32))
+    )
     return jnp.asarray(fn(theta, seed), dtype=jnp.float32)
 
 

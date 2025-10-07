@@ -14,24 +14,18 @@ import numpy as np
 import tyro
 from jax import ShapeDtypeStruct
 
-from precond_npe_misspec.engine.run import (
-    NpeRsConfig,
-    PosteriorConfig,
-    PrecondConfig,
-    RobustConfig,
-    RunConfig,
-    run_experiment,
-)
-from precond_npe_misspec.engine.spec import (
-    ExperimentSpec,
-    FlowConfig,
-    default_posterior_flow_builder,
-)
+from precond_npe_misspec.engine.run import (NpeRsConfig, PosteriorConfig,
+                                            PrecondConfig, RobustConfig,
+                                            RunConfig, run_experiment)
+from precond_npe_misspec.engine.spec import (ExperimentSpec, FlowConfig,
+                                             default_posterior_flow_builder)
 from precond_npe_misspec.examples import bvcbm as ex
 from precond_npe_misspec.examples.embeddings import build as get_embedder
 
 
-def _uniform_logpdf_box(theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray) -> jnp.ndarray:
+def _uniform_logpdf_box(
+    theta: jnp.ndarray, lo: jnp.ndarray, hi: jnp.ndarray
+) -> jnp.ndarray:
     th = jnp.asarray(theta)
     inside = jnp.all((th >= lo) & (th <= hi))
     return jnp.where(inside, 0.0, -jnp.inf)
@@ -45,23 +39,13 @@ class Config:
     obs_seed: int = 1234
     outdir: str | None = None
     T: int = 19
-    start_volume: float = 50.0
+    start_volume: float = 100.0
     page: int = 5
     dataset: Literal["breast", "pancreatic"] = "pancreatic"
     patient_idx: int = 0  # 0..3
 
-    # (p0_1, psc_1, dmax_1, gage_1[h], p0_2, psc_2, dmax_2, gage_2[h], tau[days])
-    theta_true: tuple[float, float, float, float, float, float, float, float, float] = (
-        0.05,
-        0.01,
-        30.0,
-        48.0,
-        0.04,
-        0.008,
-        30.0,
-        48.0,
-        7.0,
-    )
+    # 3-parameter biphasic: (gage1[h], tau[days], gage2[h])
+    theta_true: tuple[float, float, float] = (200.0, 12.0, 50.0)
 
     obs_model: Literal["synthetic", "real"] = "real"
     summary: Literal["identity", "log"] = "identity"
@@ -77,7 +61,7 @@ class Config:
 
 # ---------- Spec builder ----------
 def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> ExperimentSpec:
-    theta_dim = 9
+    theta_dim = 3
 
     # --- host simulator via callback (JAX-safe) ---
     T_fixed = int(T_sim)
@@ -144,11 +128,15 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
         seed = jax.random.randint(key, (), 0, 2**31 - 1, dtype=jnp.uint32)
         # shape-aware result spec: (T,) if unbatched, else (B, T)
         is_batched = len(theta.shape) == 2
-        shape: tuple[int, ...] = (int(theta.shape[0]), T_fixed) if is_batched else (T_fixed,)
+        shape: tuple[int, ...] = (
+            (int(theta.shape[0]), T_fixed) if is_batched else (T_fixed,)
+        )
         out_shape: ShapeDtypeStruct = ShapeDtypeStruct(shape, jnp.float32)
         result: jax.Array = cast(
             jax.Array,
-            jax.pure_callback(_simulate_np, out_shape, theta, seed, vmap_method="broadcast_all"),
+            jax.pure_callback(
+                _simulate_np, out_shape, theta, seed, vmap_method="broadcast_all"
+            ),
         )
         return result
 
@@ -164,7 +152,9 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
             return jnp.asarray(ex.summary_identity(jnp.asarray(x)))
 
     # Probe to infer summary dimension
-    x_probe = jnp.asarray(sim_py(np.asarray(cfg.theta_true, float), seed=0), jnp.float32)
+    x_probe = jnp.asarray(
+        sim_py(np.asarray(cfg.theta_true, float), seed=0), jnp.float32
+    )
     s_dim = int(summaries(x_probe).shape[-1])
 
     # Priors (Uniforms; g_age in hours, τ in days)
@@ -202,17 +192,13 @@ def _make_spec(cfg: Config, y_obs: jnp.ndarray | None, T_sim: int) -> Experiment
         build_posterior_flow=default_posterior_flow_builder(theta_dim, s_dim),
         build_embedder=get_embedder(cfg.embedder),
         theta_labels=(
-            r"$p_0^{(1)}$",
-            r"$p_{\mathrm{psc}}^{(1)}$",
-            r"$d_{\max}^{(1)}$",
             r"$g_{\mathrm{age}}^{(1)}\,[\mathrm{h}]$",
-            r"$p_0^{(2)}$",
-            r"$p_{\mathrm{psc}}^{(2)}$",
-            r"$d_{\max}^{(2)}$",
-            r"$g_{\mathrm{age}}^{(2)}\,[\mathrm{h}]$",
             r"$\tau\,[\mathrm{days}]$",
+            r"$g_{\mathrm{age}}^{(2)}\,[\mathrm{h}]$",
         ),
-        summary_labels=tuple(f"{'logV' if cfg.summary == 'log' else 'V'}[t={t}]" for t in range(s_dim)),
+        summary_labels=tuple(
+            f"{'logV' if cfg.summary == 'log' else 'V'}[t={t}]" for t in range(s_dim)
+        ),
         theta_lo=lo,
         theta_hi=hi,
         simulate_path="precond_npe_misspec.examples.bvcbm:simulate_biphasic",  # adaptor to add in examples
@@ -228,7 +214,12 @@ def _load_real_observations(T: int, *, dataset: str, patient_idx: int) -> jnp.nd
     if mat_path:
         data_path = Path(mat_path)
     else:
-        data_path = Path(__file__).resolve().parents[2] / "precond_npe_misspec" / "data" / "CancerDatasets.mat"
+        data_path = (
+            Path(__file__).resolve().parents[2]
+            / "precond_npe_misspec"
+            / "data"
+            / "CancerDatasets.mat"
+        )
     if not data_path.exists():
         raise FileNotFoundError(f"Missing real data file at {data_path}")
 
@@ -238,7 +229,9 @@ def _load_real_observations(T: int, *, dataset: str, patient_idx: int) -> jnp.nd
     if arr is None:
         raise KeyError(f"'{key}' missing from {data_path.name}")
     if arr.ndim < 2 or patient_idx >= arr.shape[1]:
-        raise ValueError(f"Unexpected shape for {key}; need ≥4 columns, got {arr.shape}")
+        raise ValueError(
+            f"Unexpected shape for {key}; need ≥4 columns, got {arr.shape}"
+        )
     if T > arr.shape[0]:
         raise ValueError(f"T={T} exceeds available samples {arr.shape[0]}")
     series = np.squeeze(arr[:T, patient_idx])
@@ -247,7 +240,9 @@ def _load_real_observations(T: int, *, dataset: str, patient_idx: int) -> jnp.nd
 
 def main(cfg: Config) -> None:
     if cfg.obs_model == "real":
-        y_obs = _load_real_observations(cfg.T, dataset=cfg.dataset, patient_idx=cfg.patient_idx)
+        y_obs = _load_real_observations(
+            cfg.T, dataset=cfg.dataset, patient_idx=cfg.patient_idx
+        )
         T_sim = int(y_obs.shape[0])
     else:
         y_obs = None
