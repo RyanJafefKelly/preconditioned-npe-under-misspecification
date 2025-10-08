@@ -1,0 +1,28 @@
+#!/bin/bash -l
+#PBS -N bvcbm_ppd
+#PBS -l walltime=06:00:00
+#PBS -l mem=8GB
+#PBS -l ncpus=1
+#PBS -j oe
+
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+export JAX_PLATFORMS=cpu XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
+export XLA_PYTHON_CLIENT_PREALLOCATE=false JAX_ENABLE_X64=1
+
+export PATH="$HOME/.local/bin:$PATH"
+export UV_CACHE_DIR="${SCRATCH:-$HOME}/.cache/uv"
+export UV_PROJECT_ENVIRONMENT="$PBS_O_WORKDIR/.venv"
+uv sync --no-dev --frozen --python 3.13
+
+: "${METHOD:=rnpe}"; : "${DATASET:=pancreatic}"; : "${PATIENT_IDX:=0}"
+: "${T:=32}"; : "${PAGE:=5}"; : "${SUMMARY:=identity}"; : "${OBS_MODEL:=real}"
+: "${PPD_N:=2000}"; : "${SEED:=0}"
+
+uv run python -m precond_npe_misspec.scripts.ppd_from_posterior \
+  --results_root results/bvcbm \
+  --method "$METHOD" --dataset "$DATASET" --patient_idx "$PATIENT_IDX" \
+  --T "$T" --page "$PAGE" --summary "$SUMMARY" --obs_model "$OBS_MODEL" \
+  --M "$PPD_N" --seed "$SEED"
