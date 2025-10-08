@@ -8,7 +8,7 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 
 : "${SEED:=0}"
 : "${T:=32}"
-: "${START_VOLUME:=100.0}"
+: "${START_VOLUME:=50.0}"
 : "${PAGE:=5}"
 : "${SUMMARY:=identity}"           # log|identity
 : "${OBS_MODEL:=real}"   # synthetic|real

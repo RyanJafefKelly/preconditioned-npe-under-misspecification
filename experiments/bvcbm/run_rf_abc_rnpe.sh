@@ -8,7 +8,7 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 
 : "${SEED:=0}"
 : "${T:=32}"
-: "${START_VOLUME:=100.0}"
+: "${START_VOLUME:=50.0}"
 : "${PAGE:=5}"
 : "${SUMMARY:=identity}"           # log|identity
 : "${OBS_MODEL:=real}"             # synthetic|real
@@ -48,7 +48,7 @@ THETA="${THETA:-$THETA_DEFAULT}"; read -r -a THETA_ARR <<< "$THETA"
 : "${LAPLACE_ALPHA:=0.3}"; : "${LAPLACE_MIN_SCALE:=0.01}"
 : "${STUDENT_T_SCALE:=0.05}"; : "${STUDENT_T_DF:=1.0}"
 : "${CAUCHY_SCALE:=0.05}"; : "${SPIKE_STD:=0.01}"; : "${SLAB_SCALE:=0.25}"
-: "${MISSPECIFIED_PROB:=0.5}"; : "${LEARN_PROB:=0}"
+: "${MISSPECIFIED_PROB:=0.5}"; : "${LEARN_PROB:=1}"
 
 # MCMC
 : "${MCMC_WARMUP:=1000}"; : "${MCMC_SAMPLES:=2000}"; : "${MCMC_THIN:=1}"

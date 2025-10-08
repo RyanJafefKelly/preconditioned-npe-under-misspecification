@@ -14,11 +14,19 @@ import numpy as np
 import tyro
 from jax import ShapeDtypeStruct
 
-from precond_npe_misspec.engine.run import (NpeRsConfig, PosteriorConfig,
-                                            PrecondConfig, RobustConfig,
-                                            RunConfig, run_experiment)
-from precond_npe_misspec.engine.spec import (ExperimentSpec, FlowConfig,
-                                             default_posterior_flow_builder)
+from precond_npe_misspec.engine.run import (
+    NpeRsConfig,
+    PosteriorConfig,
+    PrecondConfig,
+    RobustConfig,
+    RunConfig,
+    run_experiment,
+)
+from precond_npe_misspec.engine.spec import (
+    ExperimentSpec,
+    FlowConfig,
+    default_posterior_flow_builder,
+)
 from precond_npe_misspec.examples import bvcbm as ex
 from precond_npe_misspec.examples.embeddings import build as get_embedder
 
@@ -39,7 +47,7 @@ class Config:
     obs_seed: int = 1234
     outdir: str | None = None
     T: int = 19
-    start_volume: float = 100.0
+    start_volume: float = 50.0
     page: int = 5
     dataset: Literal["breast", "pancreatic"] = "pancreatic"
     patient_idx: int = 0  # 0..3
