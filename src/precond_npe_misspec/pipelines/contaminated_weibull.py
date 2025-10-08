@@ -17,7 +17,11 @@ from precond_npe_misspec.engine.run import (
     RunConfig,
     run_experiment,
 )
-from precond_npe_misspec.engine.spec import ExperimentSpec, FlowConfig, default_posterior_flow_builder
+from precond_npe_misspec.engine.spec import (
+    ExperimentSpec,
+    FlowConfig,
+    default_posterior_flow_builder,
+)
 from precond_npe_misspec.examples import contaminated_weibull as cw
 from precond_npe_misspec.examples.embeddings import build as get_embedder
 
@@ -69,7 +73,9 @@ def _prior_logpdf_lognorm(
     if th.shape[-1] != 2:
         raise ValueError("theta must have last dimension 2: (k, lambda).")
     k, lam = th[..., 0], th[..., 1]
-    return _lognorm_logpdf(k, logk_mu, logk_sigma) + _lognorm_logpdf(lam, loglam_mu, loglam_sigma)
+    return _lognorm_logpdf(k, logk_mu, logk_sigma) + _lognorm_logpdf(
+        lam, loglam_mu, loglam_sigma
+    )
 
 
 @dataclass
@@ -78,36 +84,41 @@ class Config:
     seed: int = 0
     obs_seed: int = 1234
     outdir: str | None = None
-    n_obs: int = 200
-    theta_true: tuple[float, float] = (0.8, 2.0)
+    n_obs: int = 2000
+    theta_true: tuple[float] = (0.8,)
     obs_model: Literal["assumed", "true"] = "true"
     eps: float = 0.05
     alpha: float = 40.0
 
     # Engines
-    precond: PrecondConfig = PrecondConfig(method="rf_abc")
+    precond: PrecondConfig = PrecondConfig()
     # precond: PrecondConfig = PrecondConfig(
     #     method="rejection", q_precond=0.10, n_sims=200_000
     # )
-    posterior: PosteriorConfig = PosteriorConfig("npe_rs")  # default "rnpe"
+    posterior: PosteriorConfig = PosteriorConfig()  # default "rnpe"
     robust: RobustConfig = RobustConfig()
     flow: FlowConfig = FlowConfig()
     npers: NpeRsConfig = NpeRsConfig()
     # Prior hyperparameters (log‑normal on k and λ)
     logk_mu: float = -0.4
     logk_sigma: float = 1.2
-    loglam_mu: float = -0.4
-    loglam_sigma: float = 1.2
+
+
+def _prior_logpdf_factory(cfg: Config) -> Callable[[jax.Array], jnp.ndarray]:
+    def _logpdf(theta: jnp.ndarray) -> jnp.ndarray:
+        return cw.prior_logpdf(theta, mu=cfg.logk_mu, sigma=cfg.logk_sigma)
+
+    return _logpdf
 
 
 def _prior_sample_factory(cfg: Config) -> Callable[[jax.Array], jnp.ndarray]:
     def _sampler(key: jax.Array) -> jnp.ndarray:
         return cw.prior_sample(
             key,
-            logk_mu=cfg.logk_mu,
-            logk_sigma=cfg.logk_sigma,
-            loglam_mu=cfg.loglam_mu,
-            loglam_sigma=cfg.loglam_sigma,
+            mu=cfg.logk_mu,
+            sigma=cfg.logk_sigma,
+            # loglam_mu=cfg.loglam_mu,
+            # loglam_sigma=cfg.loglam_sigma,
         )
 
     return _sampler
@@ -115,7 +126,9 @@ def _prior_sample_factory(cfg: Config) -> Callable[[jax.Array], jnp.ndarray]:
 
 def _make_spec(cfg: Config) -> ExperimentSpec:
     # Probe summaries to set s_dim
-    x_probe = cw.simulate(jax.random.key(0), jnp.asarray(cfg.theta_true), n_obs=cfg.n_obs)
+    x_probe = cw.simulate(
+        jax.random.key(0), jnp.asarray(cfg.theta_true), n_obs=cfg.n_obs
+    )
 
     # Choose observation DGP
     if cfg.obs_model == "assumed":
@@ -130,33 +143,35 @@ def _make_spec(cfg: Config) -> ExperimentSpec:
             eps=cfg.eps,  #   alpha=cfg.alpha
         )
 
-    summaries_fn = cw.ss_log
-    if cfg.posterior.method == "npe_rs":
+    summaries_fn = cw.summaries
+    # if cfg.posterior.method == "npe_rs":
 
-        def flatten_raw(x: Array) -> Array:
-            return jnp.ravel(x)  # pass raw data to the embedder
+    #     def flatten_raw(x: Array) -> Array:
+    #         return jnp.ravel(x)  # pass raw data to the embedder
 
-        summaries_fn = flatten_raw
-    x_probe = cw.simulate(jax.random.key(0), jnp.asarray(cfg.theta_true), n_obs=cfg.n_obs)
+    # summaries_fn = flatten_raw
+    x_probe = cw.simulate(
+        jax.random.key(0), jnp.asarray(cfg.theta_true), n_obs=cfg.n_obs
+    )
     s_dim = int(summaries_fn(x_probe).shape[-1])
     return ExperimentSpec(
         name="contaminated_weibull",
-        theta_dim=2,
+        theta_dim=1,
         s_dim=s_dim,
         prior_sample=_prior_sample_factory(cfg),
-        prior_logpdf=lambda th: _prior_logpdf_lognorm(th, cfg.logk_mu, cfg.logk_sigma, cfg.loglam_mu, cfg.loglam_sigma),
+        prior_logpdf=_prior_logpdf_factory(cfg),
         true_dgp=true_dgp,
         simulate=lambda key, theta, **kw: cw.simulate(key, theta, n_obs=cfg.n_obs),
         summaries=lambda x: summaries_fn(x),
-        build_posterior_flow=default_posterior_flow_builder(2, s_dim),
+        build_posterior_flow=default_posterior_flow_builder(1, s_dim),
         build_embedder=get_embedder("iid_deepset"),
         # make_distance=cw.make_distance_ignore_skew,  # ignore skew in ABC distance
-        theta_labels=("k", "lambda"),
-        summary_labels=("median", "IDR", "IOR", "log_skew"),
+        theta_labels=("k",),
+        summary_labels=("var", "mean", "min"),
         simulate_path="precond_npe_misspec.examples.contaminated_weibull:simulate",
-        summaries_path="precond_npe_misspec.examples.contaminated_weibull:summaries_for_metrics",
-        theta_lo=jnp.zeros(2),
-        theta_hi=100 * jnp.ones(2),
+        summaries_path="precond_npe_misspec.examples.contaminated_weibull:summaries",
+        theta_lo=jnp.zeros(1),
+        theta_hi=100 * jnp.ones(1),
         # leave theta_lo/hi=None → unconstrained θ training
     )
 
@@ -177,7 +192,7 @@ def simulate(
 
 
 def summaries_for_metrics(x: Array) -> Array:
-    return cw.summaries_for_metrics(x)
+    return cw.summaries(x)
 
 
 def main(cfg: Config) -> None:

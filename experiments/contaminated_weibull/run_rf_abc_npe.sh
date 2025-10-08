@@ -10,14 +10,14 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 # Contaminated Weibull specifics
 # ---------------------------
 : "${N_OBS:=200}"
-THETA_DEFAULT="0.8 2.0"           # (k, lambda)
+THETA_DEFAULT="0.8"           # (k, lambda)
 : "${OBS_MODEL:=true}"            # true|assumed
-: "${EPS:=0.05}"
+: "${EPS:=0.1}"
 : "${ALPHA:=20.0}"
 
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
-(( ${#THETA_ARR[@]} == 2 )) || { echo "need 2 values for THETA (k lambda)"; exit 1; }
+# (( ${#THETA_ARR[@]} == 2 )) || { echo "need 2 values for THETA (k lambda)"; exit 1; }
 
 # ---------------------------
 # Preconditioning: RF-ABC
@@ -46,7 +46,7 @@ RF_TAG="mode_${ABC_RF_MODE}-nest_${RF_N_ESTIMATORS}-leaf_${RF_MIN_LEAF}"
 [[ -n "${RF_MAX_DEPTH}" ]] && RF_TAG="${RF_TAG}-depth_${RF_MAX_DEPTH}"
 [[ "${RF_TRAIN_FRAC}" != "1.0" ]] && RF_TAG="${RF_TAG}-tfrac_${RF_TRAIN_FRAC}"
 
-GROUP="th_$(printf 'k%s_lam%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-obs_${OBS_MODEL}-eps_${EPS}-alpha_${ALPHA}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
+GROUP="th_$(printf 'k%s' "${THETA_ARR[0]}")-n_obs_${N_OBS}-obs_${OBS_MODEL}-eps_${EPS}-alpha_${ALPHA}-n_sims_${N_SIMS}-q_${Q_PRECOND}"
 OUTDIR="results/contaminated_weibull/rf_abc_npe/${GROUP}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
 

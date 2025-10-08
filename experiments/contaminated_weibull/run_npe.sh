@@ -7,24 +7,24 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 
 # CW specifics
 : "${N_OBS:=200}"                   # observed sample size
-THETA_DEFAULT="0.8 2.0"             # (k, lambda)
+THETA_DEFAULT="0.8"             # (k, lambda)
 : "${OBS_MODEL:=true}"              # true|assumed  (true = contaminated)
 : "${EPS:=0.05}"
 : "${ALPHA:=40.0}"
 
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
-if (( ${#THETA_ARR[@]} != 2 )); then
-  echo "Error: need 2 values for THETA (k lambda). Got: ${#THETA_ARR[@]}" >&2
-  exit 1
-fi
+# if (( ${#THETA_ARR[@]} != 2 )); then
+#   echo "Error: need 2 values for THETA (k lambda). Got: ${#THETA_ARR[@]}" >&2
+#   exit 1
+# fi
 
 # Training set size (no preconditioning)
 : "${N_SIMS:=20000}"
 : "${PRECOND_METHOD:=none}"         # none|rejection|smc_abc
 : "${Q_PRECOND:=1.0}"
 
-GROUP="th_$(printf 'k%s_lam%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-obs_${OBS_MODEL}-eps_${EPS}-alpha_${ALPHA}-n_sims_${N_SIMS}"
+GROUP="th_$(printf 'k%s' "${THETA_ARR[0]}")-n_obs_${N_OBS}-obs_${OBS_MODEL}-eps_${EPS}-alpha_${ALPHA}-n_sims_${N_SIMS}"
 OUTDIR="results/contaminated_weibull/npe/${GROUP}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
 

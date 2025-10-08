@@ -3,21 +3,21 @@ set -euo pipefail
 export JAX_ENABLE_X64="${JAX_ENABLE_X64:-1}"
 
 DATE=$(date +"%Y%m%d-%H%M%S")
-: "${SEED:=1}"
+: "${SEED:=0}"
 
 # CW specifics
 : "${N_OBS:=200}"
-THETA_DEFAULT="0.8 2.0"             # (k, lambda)
+THETA_DEFAULT="0.8"             # (k, lambda)
 : "${OBS_MODEL:=true}"
-: "${EPS:=0.05}"
+: "${EPS:=0.1}"
 : "${ALPHA:=40.0}"
 
 THETA="${THETA:-$THETA_DEFAULT}"
 read -r -a THETA_ARR <<< "$THETA"
-if (( ${#THETA_ARR[@]} != 2 )); then
-  echo "Error: need 2 values for THETA (k lambda). Got: ${#THETA_ARR[@]}" >&2
-  exit 1
-fi
+# if (( ${#THETA_ARR[@]} != 2 )); then
+#   echo "Error: need 2 values for THETA (k lambda). Got: ${#THETA_ARR[@]}" >&2
+#   exit 1
+# fi
 
 # Preconditioning
 : "${N_SIMS:=20000}"
@@ -33,7 +33,7 @@ fi
 : "${SMC_C_TUNING:=0.01}"
 : "${SMC_B_SIM:=1}"
 
-GROUP="th_$(printf 'k%s_lam%s' "${THETA_ARR[@]}")-n_obs_${N_OBS}-obs_${OBS_MODEL}-eps_${EPS}-alpha_${ALPHA}-n_sims_${N_SIMS}"
+GROUP="th_$(printf 'k%s' "${THETA_ARR[0]}")-n_obs_${N_OBS}-obs_${OBS_MODEL}-eps_${EPS}-alpha_${ALPHA}-n_sims_${N_SIMS}"
 OUTDIR="results/contaminated_weibull/pnpe/${GROUP}/seed-${SEED}/${DATE}"
 mkdir -p "$OUTDIR"
 
