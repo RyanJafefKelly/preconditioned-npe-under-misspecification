@@ -1,8 +1,12 @@
 from __future__ import annotations
-import json, os, re, sys, time, importlib
+
+import importlib
+import json
+import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+
 import numpy as np
 import tyro
 
@@ -45,35 +49,27 @@ def _import_by_path(path: str):
     return getattr(m, func), m
 
 
-def _pick_latest_run(method_dir: Path, group_pred) -> Path:
+def _pick_latest_run(method_dir: Path, group_pred, required_dim: int = 3) -> Path:
+    """Return the newest run that has posterior samples with shape (N, required_dim)."""
+    candidates: list[Path] = []
     groups = [g for g in method_dir.iterdir() if g.is_dir() and group_pred(g.name)]
     if not groups:
         raise FileNotFoundError("no matching groups")
-
-    # keep 3-parameter groups only
-    def pcount(name: str) -> int:
-        m = re.search(r"-th_(.+?)-sum_", name)
-        toks = [] if not m else m.group(1).split("_")
-        return sum(t.startswith("p") for t in toks)
-
-    groups = [g for g in groups if pcount(g.name) == 3]
-    if not groups:
-        raise FileNotFoundError("no 3-parameter groups")
-    # choose seed and latest timestamp
-    seeds = []
     for g in groups:
-        seed_dirs = sorted(
-            [d for d in g.iterdir() if d.is_dir() and d.name.startswith("seed-")]
-        )
+        seed_dirs = sorted([d for d in g.iterdir() if d.is_dir() and d.name.startswith("seed-")])
         if not seed_dirs:
             continue
         s = next((d for d in seed_dirs if d.name == "seed-0"), seed_dirs[0])
-        runs = sorted([r for r in s.iterdir() if r.is_dir()])
-        if runs:
-            seeds.append(runs[-1])
-    if not seeds:
-        raise FileNotFoundError("no timestamped runs found")
-    return sorted(seeds)[-1]
+        for r in sorted([r for r in s.iterdir() if r.is_dir()]):
+            try:
+                arr, _ = _load_samples(r)
+                if arr.ndim == 2 and arr.shape[1] == required_dim:
+                    candidates.append(r)
+            except Exception:
+                continue
+    if not candidates:
+        raise FileNotFoundError(f"no runs with posterior samples of shape (N,{required_dim})")
+    return sorted(candidates)[-1]
 
 
 @dataclass
@@ -112,12 +108,17 @@ def main(a: Args) -> None:
             )
 
         try:
-            run_dir = _pick_latest_run(base, pred)
+            run_dir = _pick_latest_run(base, pred, required_dim=3)
+
             break
         except FileNotFoundError:
             continue
     if run_dir is None:
-        raise FileNotFoundError("no run found for provided args")
+        raise FileNotFoundError(
+            f"no run found for args: method={a.method} dataset={a.dataset} p={a.patient_idx} "
+            f"T={a.T} page={a.page} summary={a.summary} obs={a.obs_model} "
+            f"under {a.results_root}/{a.method} (need posterior_samples with shape (N,3))"
+        )
 
     thetas, src = _load_samples(run_dir)
     M = min(a.M, thetas.shape[0])
@@ -135,7 +136,8 @@ def main(a: Args) -> None:
             return sim(th, sd)
 
     else:
-        import jax, jax.numpy as jnp
+        import jax
+        import jax.numpy as jnp
 
         def simulate_one(th: Iterable[float], sd: int) -> np.ndarray:
             key = jax.random.PRNGKey(sd)
@@ -145,9 +147,7 @@ def main(a: Args) -> None:
     rng = np.random.default_rng(a.seed)
     idx = rng.choice(thetas.shape[0], size=M, replace=False)
     seeds = rng.integers(0, 2**31 - 1, size=M, dtype=np.uint32)
-    Y = np.stack(
-        [simulate_one(thetas[i], int(seeds[i])) for i in range(M)], axis=0
-    ).astype(np.float32)
+    Y = np.stack([simulate_one(thetas[i], int(seeds[i])) for i in range(M)], axis=0).astype(np.float32)
 
     # Optional summaries
     S = None
