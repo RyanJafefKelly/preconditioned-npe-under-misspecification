@@ -108,8 +108,8 @@ THETA_TARGET_DEFAULT="$THETA_DEFAULT"
 THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"; THETA_TARGET="${THETA_TARGET//,/}"
 read -r -a THETA_TARGET_ARR <<< "$THETA_TARGET"
 
-# PPD subset/standardise controls (leave PPD_IDX empty to use all)
-: "${PPD_IDX:=}"
+# PPD subset/standardise controls (first two of three summaries)
+: "${PPD_IDX:=0 1}"
 : "${PPD_STANDARDISE:=0}"
 
 # Build metrics command
