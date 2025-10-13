@@ -440,6 +440,32 @@ def _aggregate(args: Args) -> None:
     bias_mean = _stack_mean(bias)
     mse_mean = _stack_mean(mse)
 
+    def _stack_mean_sd(
+        d: dict[str, list[np.ndarray]],
+    ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+        mean_out: dict[str, np.ndarray] = {}
+        sd_out: dict[str, np.ndarray] = {}
+        for m in methods:
+            arrs = d[m]
+            if arrs:
+                X = np.vstack(arrs)  # (R, D)
+                mean_out[m] = X.mean(axis=0)
+                sd_out[m] = X.std(axis=0, ddof=1) if X.shape[0] > 1 else np.zeros(X.shape[1])
+            else:
+                mean_out[m] = np.full(theta_dim, np.nan)
+                sd_out[m] = np.full(theta_dim, np.nan)
+        return mean_out, sd_out
+
+    # bias mean/sd
+    bias_mean_per_m, bias_sd_per_m = _stack_mean_sd(bias)
+
+    # rmse mean/sd computed per run from mse
+    rmse: dict[str, list[np.ndarray]] = {m: [] for m in methods}
+    for m in methods:
+        for arr in mse[m]:
+            rmse[m].append(np.sqrt(np.maximum(arr, 0.0)))
+    rmse_mean_per_m, rmse_sd_per_m = _stack_mean_sd(rmse)
+
     def _scalar_stats(vals: list[float]) -> tuple[float, float, int]:
         if not vals:
             return (math.nan, math.nan, 0)
@@ -456,7 +482,11 @@ def _aggregate(args: Args) -> None:
     df_cov_hpdi = _wide(cov_hpdi_mean)
     df_cov_central = _wide(cov_central_mean)
     df_bias = _wide(bias_mean)
+    df_bias_sd = _wide(bias_sd_per_m)
     df_mse = _wide(mse_mean)
+    df_rmse_mean = _wide(rmse_mean_per_m)
+    df_rmse_sd = _wide(rmse_sd_per_m)
+
     df_logprob = pd.DataFrame(
         {
             "mean": [logprob_stats[m][0] for m in methods],
@@ -478,7 +508,10 @@ def _aggregate(args: Args) -> None:
     out_dir.joinpath(f"coverage_hpdi_{lvl_tag}.csv").write_text(df_cov_hpdi.to_csv())
     out_dir.joinpath(f"coverage_central_{lvl_tag}.csv").write_text(df_cov_central.to_csv())
     out_dir.joinpath("bias.csv").write_text(df_bias.to_csv())
+    out_dir.joinpath("bias_sd.csv").write_text(df_bias_sd.to_csv())
     out_dir.joinpath("mse.csv").write_text(df_mse.to_csv())
+    out_dir.joinpath("rmse_mean.csv").write_text(df_rmse_mean.to_csv())
+    out_dir.joinpath("rmse_sd.csv").write_text(df_rmse_sd.to_csv())
     out_dir.joinpath("logprob.csv").write_text(df_logprob.to_csv())
     out_dir.joinpath("ppd_median.csv").write_text(df_ppd.to_csv())
 
@@ -535,6 +568,38 @@ def _aggregate(args: Args) -> None:
         tex = _df_to_latex(df, percent=percent, decimals=args.decimals, caption=caption, label=label)
         out_dir.joinpath(name).write_text(tex)
 
+    def _write_mean_sd(mean_df: pd.DataFrame, sd_df: pd.DataFrame, name: str, caption: str, label: str) -> None:
+        # render each cell as "m (sd)"
+        cols = [str(c) for c in mean_df.columns]
+        colspec = "l" + "c" * len(cols)
+        lines = [
+            r"\begin{table}[ht]",
+            r"\centering",
+            r"\begin{tabular}{" + colspec + r"}",
+            r"\hline",
+        ]
+        lines.append(" & ".join([""] + [_escape_tex(c) for c in cols]) + r" \\")
+        lines.append(r"\hline")
+        for r, idx in enumerate(mean_df.index):
+            row = [_escape_tex(str(idx))]
+            for c in cols:
+                m = mean_df.iloc[r][c]
+                s = sd_df.iloc[r][c]
+                if pd.isna(m):
+                    row.append(r"--")
+                else:
+                    fm = f"{float(m):.{args.decimals}f}"
+                    fs = "--" if pd.isna(s) else f"{float(s):.{args.decimals}f}"
+                    row.append(f"{fm} ({fs})")
+            lines.append(" & ".join(row) + r" \\")
+        lines += [r"\hline", r"\end{tabular}"]
+        if caption:
+            lines.append(r"\caption{" + _escape_tex(caption) + r"}")
+        if label:
+            lines.append(r"\label{" + _escape_tex(label) + r"}")
+        lines.append(r"\end{table}")
+        out_dir.joinpath(name).write_text("\n".join(lines))
+
     _write(
         df_cov_hpdi,
         f"coverage_hpdi_{lvl_tag}.tex",
@@ -549,6 +614,13 @@ def _aggregate(args: Args) -> None:
         f"tab:{ex_name}_cov_central",
         percent=args.percent,
     )
+    _write_mean_sd(
+        df_bias,
+        df_bias_sd,
+        "bias_mean_sd.tex",
+        f"{ex_name.upper()} marginal bias: mean (sd) across runs.",
+        f"tab:{ex_name}_bias_mean_sd",
+    )
     _write(
         df_bias,
         "bias.tex",
@@ -560,6 +632,13 @@ def _aggregate(args: Args) -> None:
         "mse.tex",
         f"{ex_name.upper()} marginal mean squared error (per parameter).",
         f"tab:{ex_name}_mse",
+    )
+    _write_mean_sd(
+        df_rmse_mean,
+        df_rmse_sd,
+        "rmse.tex",
+        f"{ex_name.upper()} marginal RMSE: mean (sd) across runs.",
+        f"tab:{ex_name}_rmse",
     )
     _write(
         df_logprob,

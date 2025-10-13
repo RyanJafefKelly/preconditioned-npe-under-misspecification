@@ -16,7 +16,10 @@ import numpy as np
 import tyro
 
 from precond_npe_misspec.engine.spec import FlowConfig, default_posterior_flow_builder
-from precond_npe_misspec.utils.metrics import compute_rep_metrics, posterior_predictive_distance_on_summaries
+from precond_npe_misspec.utils.metrics import (
+    compute_rep_metrics,
+    posterior_predictive_distance_on_summaries,
+)
 
 
 @dataclass
@@ -42,6 +45,8 @@ class Args:
     ppd_entrypoints: str | None = None  # JSON with {"simulate": "mod:fn", "summaries": "mod:fn", "sim_kwargs": {...}}
     ppd_simulate: str | None = None  # dotted path as fallback
     ppd_summaries: str | None = None  # dotted path as fallback
+    ppd_idx: tuple[int, ...] | None = None  # e.g., --ppd-idx 0 2 3
+    ppd_standardise: bool = False  # z-score using saved S_mean/S_std
 
 
 # ---------- helpers ----------
@@ -251,12 +256,38 @@ def main(a: Args) -> None:
             def _sim_wrap(k: jax.Array, th: jax.Array, _n: int) -> jax.Array:  # ignore third arg
                 return cast(jax.Array, simulate(k, th, **sim_kwargs))
 
-            def _sum_wrap(x: jax.Array) -> jax.Array:
+            # base summaries
+            def _sum_base(x: jax.Array) -> jax.Array:
                 return cast(jax.Array, summaries(x, **summary_kwargs))
+
+            # optional standardisation stats
+            S_mean, S_std = (None, None)
+            if a.ppd_standardise:
+                S_mean, S_std = _load_standardisers(outdir)
+                if S_mean is None or S_std is None:
+                    raise FileNotFoundError("S_mean/S_std not found; cannot standardise summaries for PPD.")
+
+            # optional subset indices
+            idx_arr = jnp.asarray(a.ppd_idx) if a.ppd_idx is not None else None
+
+            # wrapped summaries applying standardise→subset in that order
+            def _sum_wrap(x: jax.Array) -> jax.Array:
+                s = _sum_base(x)
+                if a.ppd_standardise:
+                    s = (s - cast(jnp.ndarray, S_mean)) / (cast(jnp.ndarray, S_std) + 1e-8)
+                if idx_arr is not None:
+                    s = s[..., idx_arr]
+                return s
 
             s_obs = _load_array_stem(outdir, "s_obs")
             if s_obs is None:
                 raise FileNotFoundError("s_obs not found")
+            # apply same transforms to s_obs
+            if a.ppd_standardise:
+                s_obs = (s_obs - cast(jnp.ndarray, S_mean)) / (cast(jnp.ndarray, S_std) + 1e-8)
+            if idx_arr is not None:
+                s_obs = s_obs[..., idx_arr]
+
             if a.n_obs_override is not None:
                 sim_kwargs["n_obs"] = int(a.n_obs_override)
             # avoid n_obs=0 → NaNs in some metrics
