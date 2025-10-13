@@ -10,7 +10,7 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 # Contaminated Weibull specifics
 # ---------------------------
 : "${N_OBS:=2000}"
-THETA_DEFAULT="0.8"           # (k, lambda)
+THETA_DEFAULT="0.789"           # (k, lambda)
 : "${OBS_MODEL:=true}"            # true|assumed
 : "${EPS:=0.05}"
 : "${ALPHA:=20.0}"

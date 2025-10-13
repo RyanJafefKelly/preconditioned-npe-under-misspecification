@@ -7,7 +7,7 @@ DATE=$(date +"%Y%m%d-%H%M%S")
 
 # CW specifics
 : "${N_OBS:=200}"                   # observed sample size
-THETA_DEFAULT="0.8"             # (k, lambda)
+THETA_DEFAULT="0.789"             # (k, lambda)
 : "${OBS_MODEL:=true}"              # true|assumed  (true = contaminated)
 : "${EPS:=0.05}"
 : "${ALPHA:=40.0}"

@@ -84,7 +84,7 @@ def compute_rep_metrics(
     th = jnp.asarray(theta_target)
 
     mu, sd = posterior_mean_sd(s)
-    bias = mu - th
+    bias = jnp.abs(mu - th)
     var = jnp.square(sd)
     se_mean = jnp.square(bias)  # squared error of posterior mean
     post_mse = var + jnp.square(bias)  # E[(θ-θ†)^2 | posterior]
