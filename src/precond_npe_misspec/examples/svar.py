@@ -79,6 +79,7 @@ def true_dgp(
     k: int = 6,
     T: int = 1000,
     pairs: Array | None = None,
+    mu: float = 0.05,
     eps: float = 0.02,  # fraction of contaminated time points
     kappa: float = 12.0,  # outlier scale multiplier
     df: float = 1.0,  # heavy tail (df=1 ⇒ Cauchy-like)
@@ -93,16 +94,21 @@ def true_dgp(
     # e_t = kappa * sigma * _student_t_noise(k_eps, df, (T, 1))  # shared across channels
 
     # misspecify mean. # TODO: more interesting misspecification?
-    return Y + 0.05
+    return Y + mu
 
 
 def summaries(Y: jnp.ndarray, pairs: Array | None = None) -> jnp.ndarray:
     """Lag-1 cross autocov for each directed pair, plus pooled std over all entries."""
     pairs = default_pairs() if pairs is None else pairs
     T = Y.shape[0]
-    A = Y[1:, pairs[:, 0]] * Y[:-1, pairs[:, 1]]  # shape (T-1, m)
-    B = Y[1:, pairs[:, 1]] * Y[:-1, pairs[:, 0]]  # shape (T-1, m)
-    sdir = jnp.concatenate([A.sum(0), B.sum(0)]) / T  # use 1/T as in the paper
+    Y_fwd = Y[1:, :]  # t = 2..T
+    Y_lag = Y[:-1, :]  # t = 1..T-1
+    Z_fwd = Y_fwd - jnp.mean(Y_fwd, axis=0, keepdims=True)
+    Z_lag = Y_lag - jnp.mean(Y_lag, axis=0, keepdims=True)
+    # centred lag-1 cross-covariances for directed pairs
+    A = (Z_fwd[:, pairs[:, 0]] * Z_lag[:, pairs[:, 1]]).sum(axis=0) / (T - 1)
+    B = (Z_fwd[:, pairs[:, 1]] * Z_lag[:, pairs[:, 0]]).sum(axis=0) / (T - 1)
+    sdir = jnp.concatenate([A, B])
     s_sigma = jnp.std(Y.reshape(-1), ddof=0)
     Y_mean = jnp.mean(Y)
     return jnp.concatenate([sdir, jnp.array([s_sigma]), jnp.array([Y_mean])])
@@ -115,6 +121,7 @@ def simulate(
     k: int,
     T: int,
     obs_model: str = "assumed",
+    mu: float = 0.05,
     eps: float = 0.02,
     kappa: float = 12.0,
     df: float = 1.0,
@@ -129,6 +136,7 @@ def simulate(
         k=k,
         T=T,
         pairs=pairs,
+        mu=mu,
         eps=eps,
         kappa=kappa,
         df=df,
