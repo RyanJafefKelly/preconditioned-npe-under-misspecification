@@ -58,10 +58,34 @@ THETA_TARGET="${THETA_TARGET:-$THETA_TARGET_DEFAULT}"; THETA_TARGET="${THETA_TAR
 # }
 # EOF
 
-uv run python -m precond_npe_misspec.scripts.metrics_from_samples \
-  --outdir "$OUTDIR" \
-  --theta-target "${THETA_TARGET_ARR[@]}" \
-  --level 0.95 --want-hpdi --want-central \
-  --method PNPE \
-  --compute-ppd --ppd-entrypoints "$OUTDIR/entrypoints.json" \
+# PPD subset/standardise controls (leave PPD_IDX empty to use all)
+: "${PPD_IDX:=0 1 2 3 4 5 6}"
+: "${PPD_STANDARDISE:=0}"
+
+# Build metrics command
+metrics_cmd=(uv run python -m precond_npe_misspec.scripts.metrics_from_samples
+  --outdir "$OUTDIR"
+  --theta-target "${THETA_TARGET_ARR[@]}"
+  --level 0.95 --want-hpdi --want-central
+  --method PNPE
+  --compute-ppd --ppd-entrypoints "$OUTDIR/entrypoints.json"
   --ppd-n 1000 --ppd-metric l2
+)
+
+# Append subset indices if provided
+if [[ -n "$PPD_IDX" ]]; then
+  read -r -a PPD_IDX_ARR <<< "$PPD_IDX"
+  metrics_cmd+=( --ppd-idx "${PPD_IDX_ARR[@]}" )
+fi
+
+# Optional standardisation
+if [[ "$PPD_STANDARDISE" == "1" ]]; then
+  metrics_cmd+=( --ppd-standardise )
+fi
+
+# Run + record
+printf '%q ' "${metrics_cmd[@]}" | tee "${OUTDIR}/cmd_metrics.txt"; echo
+"${metrics_cmd[@]}" 2>&1 | tee -a "${OUTDIR}/stdout.log"
+
+# Log the subset used for reproducibility (does not affect aggregation)
+[[ -n "${PPD_IDX:-}" ]] && printf '%s\n' "${PPD_IDX_ARR[@]}" > "${OUTDIR}/ppd_idx.txt"
