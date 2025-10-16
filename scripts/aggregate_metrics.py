@@ -411,7 +411,12 @@ def _aggregate(args: Args) -> None:
             if isinstance(parsed.get("logprob"), (int | float)):
                 logprob[m].append(float(parsed["logprob"]))
             if isinstance(parsed.get("ppd_median"), (int | float)):
-                ppd_med[m].append(float(parsed["ppd_median"]))
+                # Use log PPD (median): log-transform positive values, skip otherwise
+                _v = float(parsed["ppd_median"])  # median PPD distance for this run
+                if np.isfinite(_v) and _v > 0.0:
+                    ppd_med[m].append(float(math.log(_v)))
+                elif args.verbose:
+                    print(f"[info] skipping non-positive/invalid PPD median at {md_path}: {_v}")
 
             if args.debug_runs > 0 and dbg_left > 0:
                 dbg_left -= 1
@@ -653,7 +658,7 @@ def _aggregate(args: Args) -> None:
     _write(
         df_ppd,
         "ppd_distance_median.tex",
-        "Posterior predictive distance (median): mean$\\pm$sd.",
+        "Log posterior predictive distance (median): mean$\\pm$sd.",
         f"tab:{ex_name}_ppd",
     )
 
