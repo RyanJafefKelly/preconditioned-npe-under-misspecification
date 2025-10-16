@@ -470,7 +470,11 @@ def _aggregate(args: Args) -> None:
         if not vals:
             return (math.nan, math.nan, 0)
         x = np.asarray(vals, float)
-        return float(x.mean()), float(x.std(ddof=1) if x.size > 1 else 0.0), int(x.size)
+        return (
+            float(np.median(x)),
+            float(x.std(ddof=1) if x.size > 1 else 0.0),
+            int(x.size),
+        )
 
     logprob_stats = {m: _scalar_stats(logprob[m]) for m in methods}
     ppd_stats = {m: _scalar_stats(ppd_med[m]) for m in methods}
