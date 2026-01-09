@@ -13,6 +13,7 @@ import numpy as _np
 
 from precond_npe_misspec.utils.artifacts import save_artifacts
 
+from .likelihood import LikelihoodFit, fit_likelihood_flow, sample_posterior_via_importance
 from .npe_rs import fit_posterior_flow_npe_rs
 from .posterior import fit_posterior_flow, sample_posterior
 from .preconditioning import run_preconditioning
@@ -50,7 +51,7 @@ class PrecondConfig:
 
 @dataclass(frozen=True)
 class PosteriorConfig:
-    method: Literal["npe", "rnpe", "npe_rs"] = "rnpe"
+    method: Literal["npe", "rnpe", "npe_rs", "nle"] = "rnpe"
     n_posterior_draws: int = 20_000
 
 
@@ -139,6 +140,15 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
 
     # Fit q(theta | s) or q(theta | eta(s)) depending on method
     rng, k_fit = jax.random.split(rng)
+    q_theta_s: Any | None = None
+    S_mean: jnp.ndarray | None = None
+    S_std: jnp.ndarray | None = None
+    th_mean: jnp.ndarray | None = None
+    th_std: jnp.ndarray | None = None
+    losses_dict: LossHistory | None = None
+    losses_list: Any = None
+    likelihood_fit: LikelihoodFit | None = None
+
     if run.posterior.method == "npe_rs":
         # rng, k_sim = jax.random.split(rng)
 
@@ -156,27 +166,69 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
         # loss_history: LossHistory = cast(LossHistory, losses_dict)
 
     else:
-        q_theta_s_std, S_mean, S_std, th_mean, th_std, losses_list = fit_posterior_flow(
-            k_fit, spec, theta_tr, S_tr, flow_cfg
-        )
-        q_theta_s = cast(Any, q_theta_s_std)
-        if isinstance(losses_list, dict):
-            losses_dict = {str(split): list(_np.asarray(values)) for split, values in losses_list.items()}
-        else:
-            losses_dict = {"nll": list(_np.asarray(losses_list))}
-        # loss_history = cast(LossHistory, losses_dict)
+        if run.posterior.method == "nle":
+            likelihood_fit = fit_likelihood_flow(k_fit, spec, theta_tr, S_tr, flow_cfg)
+        else:  # (r)npe: default case
+            q_theta_s_std, S_mean, S_std, th_mean, th_std, losses_list = fit_posterior_flow(
+                k_fit, spec, theta_tr, S_tr, flow_cfg
+            )
+            q_theta_s = cast(Any, q_theta_s_std)
+            if isinstance(losses_list, dict):
+                losses_dict = {str(split): list(_np.asarray(values)) for split, values in losses_list.items()}
+            else:
+                losses_dict = {"nll": list(_np.asarray(losses_list))}
+            # loss_history = cast(LossHistory, losses_dict)
 
-        # losses_theta = cast(LossHistory, {"nll": list(losses_list)})
+            # losses_theta = cast(LossHistory, {"nll": list(losses_list)})
     if run.posterior.method == "npe_rs":
         x_obs_w = (x_obs - X_mean) / (X_std + 1e-8)
         print("x_obs_w: ", x_obs_w)
+    elif run.posterior.method == "nle":
+        # Placeholder: actual implementation will prepare context for NLE sampling.
+        pass
     else:
         s_obs_w = (s_obs - S_mean) / (S_std + 1e-8)
         S_tr_w = (S_tr - S_mean) / (S_std + 1e-8)
         print("s_obs_w: ", s_obs_w)
 
+    res: Result | None = None
+
+    # NLE sampling placeholder
+    if run.posterior.method == "nle":
+        if likelihood_fit is None:
+            raise RuntimeError("Expected likelihood_fit to be initialised for NLE.")
+        if likelihood_fit.flow is None:
+            raise NotImplementedError("Populate likelihood_fit.flow before running NLE.")
+        rng, k_post = jax.random.split(rng)
+        theta_samps = sample_posterior_via_importance(
+            k_post,
+            spec,
+            likelihood_fit,
+            s_obs,
+            run.posterior.n_posterior_draws,
+        )
+        theta_dim = int(spec.theta_dim)
+        s_dim = int(spec.s_dim)
+        default_s_mean = jnp.zeros((s_dim,), dtype=s_obs.dtype)
+        default_s_std = jnp.ones((s_dim,), dtype=s_obs.dtype)
+        default_th_mean = jnp.zeros((theta_dim,), dtype=theta_tr.dtype)
+        default_th_std = jnp.ones((theta_dim,), dtype=theta_tr.dtype)
+        res = Result(
+            theta_train=theta_tr,
+            S_train=S_tr,
+            posterior_flow=likelihood_fit.flow,
+            x_obs=x_obs,
+            s_obs=s_obs,
+            S_mean=likelihood_fit.s_mean if likelihood_fit.s_mean is not None else default_s_mean,
+            S_std=likelihood_fit.s_std if likelihood_fit.s_std is not None else default_s_std,
+            th_mean_post=default_th_mean,
+            th_std_post=default_th_std,
+            posterior_samples_at_obs=theta_samps,
+            loss_history_theta=likelihood_fit.loss_history,
+        )
+
     # NPE/NPE-RS sampling
-    if run.posterior.method in ("npe", "npe_rs"):
+    if res is None and run.posterior.method in ("npe", "npe_rs"):
         rng, k_post = jax.random.split(rng)
         condition_vec = x_obs_w if run.posterior.method == "npe_rs" else s_obs_w
         theta_samps = sample_posterior(k_post, q_theta_s, condition_vec, run.posterior.n_posterior_draws)
@@ -194,7 +246,7 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             posterior_samples_at_obs=theta_samps,
             loss_history_theta=losses_dict,
         )
-    elif run.posterior.method == "rnpe":
+    elif res is None and run.posterior.method == "rnpe":
         # RNPE: fit q(s), denoise, then mix q(theta|s)
         rng, k_sfit = jax.random.split(rng)
         q_s_w, _ = fit_s_flow(k_sfit, spec.s_dim, S_tr_w, flow_cfg)  # TODO: IDEA - TRAIN ON FULL S
@@ -228,7 +280,7 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             denoised_s_samples=s_denoised_w,
             misspec_probs=misspec_probs,
         )
-    else:
+    elif res is None:
         raise ValueError(f"Unknown posterior.method: {run.posterior.method!r}")
 
     # Persist artefacts for metrics script
@@ -246,7 +298,9 @@ def run_experiment(spec: Any, run: RunConfig, flow_cfg: Any) -> Result:
             flow_cfg=asdict(flow_cfg),
             posterior_flow=res.posterior_flow,
             s_obs=res.s_obs,
-            posterior_samples=(res.posterior_samples_at_obs if run.posterior.method in ("npe", "npe_rs") else None),
+            posterior_samples=(
+                res.posterior_samples_at_obs if run.posterior.method in ("npe", "npe_rs", "nle") else None
+            ),
             robust_posterior_samples=(res.posterior_samples_at_obs if run.posterior.method == "rnpe" else None),
             theta_acc=res.theta_train,
             S_acc=res.S_train,

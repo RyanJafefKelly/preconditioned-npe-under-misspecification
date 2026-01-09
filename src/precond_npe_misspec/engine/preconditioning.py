@@ -71,7 +71,9 @@ def _make_dataset(
     @eqx.filter_jit  # compile two shapes at most (full and last partial)
     def _simulate_batch(th_keys: Array, sm_keys: Array) -> tuple[Array, Array, Array]:
         thetas_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, thetas_b)  # (B, n_obs)
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+            sm_keys, thetas_b
+        )  # (B, n_obs)
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
         return thetas_b, S_b, xs_b
 
@@ -127,7 +129,9 @@ def _abc_rejection_with_sim(
         th_b = jax.vmap(spec.prior_sample)(th_keys)  # (B, θ)
 
         sm_keys = jax.vmap(lambda i: jax.random.fold_in(k_sm_base, i))(idx)
-        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sm_keys, th_b)
+        xs_b = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(
+            sm_keys, th_b
+        )
         S_b = jax.vmap(spec.summaries)(xs_b)  # (B, d)
 
         d_b = _to_vec(dist_fn(S_b, s_obs))  # (B,)
@@ -149,7 +153,11 @@ def _abc_rejection_with_sim(
     n_tot = int(d_all.shape[0])
 
     # Keep exactly n_keep: q in (0,1] => fraction; q>=1 => absolute count.
-    n_keep = max(1, min(n_tot, int(jnp.ceil(q * n_tot)))) if 0 < q <= 1.0 else max(1, min(n_tot, int(q)))
+    n_keep = (
+        max(1, min(n_tot, int(jnp.ceil(q * n_tot))))
+        if 0 < q <= 1.0
+        else max(1, min(n_tot, int(q)))
+    )
 
     idx = jnp.argpartition(d_all, n_keep - 1)[:n_keep]
     idx = idx[jnp.argsort(d_all[idx])]
@@ -175,7 +183,9 @@ def run_preconditioning(
     ``X_train`` may be ``None`` when ``run.precond.store_raw_data`` is ``False`` and
     the downstream posterior does not require raw simulations.
     """
-    sim_kwargs = {} if getattr(run, "sim_kwargs", None) is None else dict(run.sim_kwargs)
+    sim_kwargs = (
+        {} if getattr(run, "sim_kwargs", None) is None else dict(run.sim_kwargs)
+    )
     batch_size = int(getattr(run, "batch_size", 512))
     method = run.precond.method
     store_raw_requested = bool(getattr(run.precond, "store_raw_data", True))
@@ -201,7 +211,9 @@ def run_preconditioning(
     if method == "none":
         key, k_data = jax.random.split(key)
         if needs_raw_global and not store_raw_requested:
-            print("Preconditioning: overriding store_raw_data=True for NPE-RS posterior")
+            print(
+                "Preconditioning: overriding store_raw_data=True for NPE-RS posterior"
+            )
         store_raw = store_raw_requested or needs_raw_global
         theta_train, S_train, x_train = _make_dataset(
             spec,
@@ -285,7 +297,9 @@ def run_preconditioning(
         # S_std = S_all.std(axis=0)
         # S_all_w = (S_all - S_mean) / (S_std + 1e-8)
         # s_obs_w = (s_obs - S_mean) / (S_std + 1e-8)
-        theta_all, S_all, diag = abc_rf_select(S=S_all, theta=theta_all, s_obs=s_obs, cfg=run.precond)
+        theta_all, S_all, diag = abc_rf_select(
+            S=S_all, theta=theta_all, s_obs=s_obs, cfg=run.precond
+        )
 
         w = np.asarray(diag["weights"], dtype=np.float64)
         w = np.clip(w, 0.0, None)
@@ -310,42 +324,42 @@ def run_preconditioning(
         print("median theta", jnp.median(theta_sel, axis=0))
         print("Sel std", jnp.std(S_sel, axis=0))
 
-        theta_lo_raw = getattr(spec, "theta_lo", None)
-        theta_hi_raw = getattr(spec, "theta_hi", None)
-        theta_lo = jnp.asarray(theta_lo_raw, dtype=theta_sel.dtype) if theta_lo_raw is not None else None
-        theta_hi = jnp.asarray(theta_hi_raw, dtype=theta_sel.dtype) if theta_hi_raw is not None else None
-        # Identify all but the first occurrence for each duplicated θ row.
-        theta_sel_np = np.asarray(theta_sel)
-        _, inverse, counts = np.unique(theta_sel_np, axis=0, return_inverse=True, return_counts=True)
-        dup_indices: list[int] = []
-        for label, count in enumerate(counts):
-            if count > 1:
-                dup_group = np.nonzero(inverse == label)[0]
-                dup_indices.extend(dup_group[1:].tolist())
-        if dup_indices:
-            dup_idx_arr = jnp.asarray(dup_indices, dtype=jnp.int32)
-            key, k_jitter = jax.random.split(key)
-            th_std = jnp.std(theta_sel, axis=0)
-            th_scale = jnp.where(th_std > 0, th_std, jnp.ones_like(th_std))
-            if theta_lo is not None and theta_hi is not None:
-                range_scale = jnp.maximum(theta_hi - theta_lo, 1e-6)
-                th_scale = jnp.minimum(th_scale, range_scale)
-            jitter_scale = 1e-2 * th_scale
-            jitter_noise = jax.random.normal(k_jitter, theta_sel[dup_idx_arr].shape, dtype=theta_sel.dtype)
-            theta_sel = theta_sel.at[dup_idx_arr].add(jitter_noise * jitter_scale)
-            if theta_lo is not None and theta_hi is not None:
-                theta_sel = jnp.clip(theta_sel, theta_lo, theta_hi)
-            print(f"rf_abc: jittered {len(dup_indices)} duplicate θ samples")
-        else:
-            print("rf_abc: no duplicate θ samples to jitter")
-        print("median theta", jnp.median(theta_sel, axis=0))
-        # Re-simulate so S reflects any jittered θ draws.
-        key, k_resim = jax.random.split(key)
-        sim_keys = jax.random.split(k_resim, theta_sel.shape[0])
-        X_sel = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sim_keys, theta_sel)
-        S_sel = jax.vmap(spec.summaries)(X_sel)
+        # theta_lo_raw = getattr(spec, "theta_lo", None)
+        # theta_hi_raw = getattr(spec, "theta_hi", None)
+        # theta_lo = jnp.asarray(theta_lo_raw, dtype=theta_sel.dtype) if theta_lo_raw is not None else None
+        # theta_hi = jnp.asarray(theta_hi_raw, dtype=theta_sel.dtype) if theta_hi_raw is not None else None
+        # # Identify all but the first occurrence for each duplicated θ row.
+        # theta_sel_np = np.asarray(theta_sel)
+        # _, inverse, counts = np.unique(theta_sel_np, axis=0, return_inverse=True, return_counts=True)
+        # dup_indices: list[int] = []
+        # for label, count in enumerate(counts):
+        #     if count > 1:
+        #         dup_group = np.nonzero(inverse == label)[0]
+        #         dup_indices.extend(dup_group[1:].tolist())
+        # if dup_indices:
+        #     dup_idx_arr = jnp.asarray(dup_indices, dtype=jnp.int32)
+        #     key, k_jitter = jax.random.split(key)
+        #     th_std = jnp.std(theta_sel, axis=0)
+        #     th_scale = jnp.where(th_std > 0, th_std, jnp.ones_like(th_std))
+        #     if theta_lo is not None and theta_hi is not None:
+        #         range_scale = jnp.maximum(theta_hi - theta_lo, 1e-6)
+        #         th_scale = jnp.minimum(th_scale, range_scale)
+        #     jitter_scale = 1e-2 * th_scale
+        #     jitter_noise = jax.random.normal(k_jitter, theta_sel[dup_idx_arr].shape, dtype=theta_sel.dtype)
+        #     theta_sel = theta_sel.at[dup_idx_arr].add(jitter_noise * jitter_scale)
+        #     if theta_lo is not None and theta_hi is not None:
+        #         theta_sel = jnp.clip(theta_sel, theta_lo, theta_hi)
+        #     print(f"rf_abc: jittered {len(dup_indices)} duplicate θ samples")
+        # else:
+        #     print("rf_abc: no duplicate θ samples to jitter")
+        # print("median theta", jnp.median(theta_sel, axis=0))
+        # # Re-simulate so S reflects any jittered θ draws.
+        # key, k_resim = jax.random.split(key)
+        # sim_keys = jax.random.split(k_resim, theta_sel.shape[0])
+        # X_sel = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sim_keys, theta_sel)
+        # S_sel = jax.vmap(spec.summaries)(X_sel)
         # Apply the same validity filtering after re-simulation
-        theta_sel, S_sel, X_sel = _filter_valid(theta_sel, S_sel, X_sel)
+        # theta_sel, S_sel, X_sel = _filter_valid(theta_sel, S_sel, X_sel)
 
         ESS = float(1.0 / (w**2).sum())
         uniq = int(np.unique(idx).size)

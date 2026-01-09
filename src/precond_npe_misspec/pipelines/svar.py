@@ -8,25 +8,18 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from precond_npe_misspec.engine.run import (
-    NpeRsConfig,
-    PosteriorConfig,
-    PrecondConfig,
-    RobustConfig,
-    RunConfig,
-    run_experiment,
-)
-from precond_npe_misspec.engine.spec import (
-    ExperimentSpec,
-    FlowConfig,
-    default_posterior_flow_builder,
-)
+from precond_npe_misspec.engine.run import (NpeRsConfig, PosteriorConfig,
+                                            PrecondConfig, RobustConfig,
+                                            RunConfig, run_experiment)
+from precond_npe_misspec.engine.spec import (ExperimentSpec, FlowConfig,
+                                             default_posterior_flow_builder)
 from precond_npe_misspec.examples.svar import assumed_dgp as svar_assumed_dgp
 from precond_npe_misspec.examples.svar import default_pairs
 from precond_npe_misspec.examples.svar import prior_logpdf as svar_prior_logpdf
 from precond_npe_misspec.examples.svar import prior_sample as svar_prior_sample
 from precond_npe_misspec.examples.svar import summaries as svar_summaries
 from precond_npe_misspec.examples.svar import true_dgp as svar_true_dgp
+from precond_npe_misspec.utils.debug_paths import ensure_debug_outdir
 
 type Array = jax.Array
 
@@ -152,6 +145,9 @@ def summaries_for_metrics(x: jax.Array, *, k: int) -> Array:
 
 
 def main(cfg: Config) -> None:
+    if cfg.outdir is None:
+        cfg.outdir = ensure_debug_outdir("svar", seed=cfg.seed)
+        print(f"[debug] saving artefacts to {cfg.outdir}")
     spec = _make_spec(cfg)
     run_experiment(
         spec,

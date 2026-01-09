@@ -29,6 +29,7 @@ from precond_npe_misspec.engine.spec import (
 )
 from precond_npe_misspec.examples import bvcbm as ex
 from precond_npe_misspec.examples.embeddings import build as get_embedder
+from precond_npe_misspec.utils.debug_paths import ensure_debug_outdir
 
 
 def _uniform_logpdf_box(
@@ -247,6 +248,9 @@ def _load_real_observations(T: int, *, dataset: str, patient_idx: int) -> jnp.nd
 
 
 def main(cfg: Config) -> None:
+    if cfg.outdir is None:
+        cfg.outdir = ensure_debug_outdir("bvcbm", seed=cfg.seed)
+        print(f"[debug] saving artefacts to {cfg.outdir}")
     if cfg.obs_model == "real":
         y_obs = _load_real_observations(
             cfg.T, dataset=cfg.dataset, patient_idx=cfg.patient_idx
