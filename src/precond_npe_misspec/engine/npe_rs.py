@@ -263,10 +263,6 @@ def fit_posterior_flow_npe_rs(
         X_std = X_std + EPS
     X_train_w = (X_train - X_mean) / X_std
     x_obs_w = (x_obs - X_mean) / X_std
-    print("X_train_w shape: ", X_train_w.shape)
-    print("x_obs_w shape: ", x_obs_w.shape)
-    print("max x: ", jnp.max(jnp.max(X_train_w)))
-    print("max x obs: ", jnp.max(jnp.max(x_obs_w)))
     dtype = jnp.float32
     X_train_w = X_train_w.astype(dtype)
     x_obs_w = x_obs_w.astype(dtype)

@@ -144,7 +144,9 @@ def get_summaries_batches(
 
         z_batch = random.normal(sub_key, shape=(n_obs, bs))
         # Ensure parameters are indexable arrays
-        x_batch = gnk(z_batch, A_[start:stop], B_[start:stop], g_[start:stop], k_[start:stop]).T  # (bs, n_obs)
+        x_batch = gnk(
+            z_batch, A_[start:stop], B_[start:stop], g_[start:stop], k_[start:stop]
+        ).T  # (bs, n_obs)
 
         octiles_batch = sum_fn(x_batch).T  # (7, bs)
         all_octiles.append(octiles_batch)
@@ -153,7 +155,7 @@ def get_summaries_batches(
 
 
 def ss_robust(y: ArrayLike) -> Array:
-    """Compute robust summary statistics as in Drovandi 2011 #TODO."""
+    """Compute robust summary statistics as in Drovandi 2011"""
     y = jnp.asarray(y)
     # Ensure 2D: (batch, n_obs)
     y2 = y[None, :] if y.ndim == 1 else y
@@ -176,7 +178,9 @@ def _get_ss_A(y: Array) -> Array:
 
 def _get_ss_B(y: Array) -> Array:
     """Compute the interquartile range."""
-    q = jnp.percentile(y, jnp.array([25.0, 75.0]), axis=-1, keepdims=True)  # (2,batch,1)
+    q = jnp.percentile(
+        y, jnp.array([25.0, 75.0]), axis=-1, keepdims=True
+    )  # (2,batch,1)
     L1, L3 = q[0], q[1]  # each (batch,1)
     iqr = L3 - L1
     eps: Array = jnp.asarray(np.finfo(np.dtype(y.dtype)).eps, dtype=y.dtype)
@@ -186,7 +190,9 @@ def _get_ss_B(y: Array) -> Array:
 
 def _get_ss_g(y: Array) -> Array:
     """Compute a skewness-like summary statistic."""
-    q = jnp.percentile(y, jnp.array([25.0, 50.0, 75.0]), axis=-1, keepdims=True)  # (3,batch,1)
+    q = jnp.percentile(
+        y, jnp.array([25.0, 50.0, 75.0]), axis=-1, keepdims=True
+    )  # (3,batch,1)
     L1, L2, L3 = q[0], q[1], q[2]  # each (batch,1)
     iqr = _get_ss_B(y)  # (batch,1)
     sg = (L3 + L1 - 2.0 * L2) / iqr
@@ -195,7 +201,9 @@ def _get_ss_g(y: Array) -> Array:
 
 def _get_ss_k(y: Array) -> Array:
     """Compute a kurtosis-like summary statistic."""
-    q = jnp.percentile(y, jnp.array([12.5, 37.5, 62.5, 87.5]), axis=-1, keepdims=True)  # (4,batch,1)
+    q = jnp.percentile(
+        y, jnp.array([12.5, 37.5, 62.5, 87.5]), axis=-1, keepdims=True
+    )  # (4,batch,1)
     E1, E3, E5, E7 = q[0], q[1], q[2], q[3]
     iqr = _get_ss_B(y)  # (batch,1)
     sk = (E7 - E5 + E3 - E1) / iqr

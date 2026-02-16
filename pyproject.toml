@@ -1,7 +1,7 @@
 [project]
 name = "precond_npe_misspec"
 version = "0.1.0"
-description = "TODO: ADD DESCRIPTION"
+description = "preconditioned neural posterior estimation under misspecification"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

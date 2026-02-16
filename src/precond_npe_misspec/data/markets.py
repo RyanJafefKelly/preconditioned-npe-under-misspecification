@@ -66,4 +66,4 @@ def load_sp500_returns_yahoo_download(
         if sd == 0:
             raise RuntimeError("Zero variance in returns.")
         r = (r - mu) / sd
-    return jnp.asarray(r, dtype=jnp.float32)  # TODO? assume float32? Let be arg?
+    return jnp.asarray(r, dtype=jnp.float32)

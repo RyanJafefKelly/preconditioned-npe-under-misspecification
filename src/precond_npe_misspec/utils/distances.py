@@ -17,7 +17,6 @@ def l1(Sw: Array, s_obs_w: Array) -> Array:
     return jnp.array(jnp.sum(jnp.abs(Sw - s_obs_w), axis=-1))
 
 
-# TODO: MMD
 def rbf_kernel(x: Array, y: Array, ell: float) -> Array:
     """RBF(x,y) with broadcasting. x: (..., d), y: (..., d) or (d,)."""
     diff = x - y
@@ -41,7 +40,9 @@ def median_heuristic(X: Array, batch: int = 1000) -> float:
     return float(jnp.sqrt(jnp.median(dists) / 2.0) + 1e-12)
 
 
-def mmd_rbf_factory(ell: float, *, sqrt: bool = True, unbiased: bool = False) -> DistanceFn:
+def mmd_rbf_factory(
+    ell: float, *, sqrt: bool = True, unbiased: bool = False
+) -> DistanceFn:
     """
     Returns f(Sw, s_obs_w) -> (N,)
     - If Sw is (N,d): uses m=1 replicate per θ: MMD^2 = 2(1 - k(x,y)).
@@ -71,7 +72,9 @@ def mmd_rbf_factory(ell: float, *, sqrt: bool = True, unbiased: bool = False) ->
 
         if unbiased and R > 1:
             # remove diagonal, average over R*(R-1)
-            s = jnp.sum(k_xx, axis=(1, 2)) - jnp.sum(jnp.diagonal(k_xx, axis1=1, axis2=2))
+            s = jnp.sum(k_xx, axis=(1, 2)) - jnp.sum(
+                jnp.diagonal(k_xx, axis1=1, axis2=2)
+            )
             k_xx_mean = s / (R * (R - 1))
         else:
             k_xx_mean = jnp.mean(k_xx, axis=(1, 2))
@@ -82,5 +85,7 @@ def mmd_rbf_factory(ell: float, *, sqrt: bool = True, unbiased: bool = False) ->
     return f
 
 
-def mmd_rbf_with_median(S_tr_w: Array, *, sqrt: bool = True, unbiased: bool = False) -> DistanceFn:
+def mmd_rbf_with_median(
+    S_tr_w: Array, *, sqrt: bool = True, unbiased: bool = False
+) -> DistanceFn:
     return mmd_rbf_factory(median_heuristic(S_tr_w), sqrt=sqrt, unbiased=unbiased)

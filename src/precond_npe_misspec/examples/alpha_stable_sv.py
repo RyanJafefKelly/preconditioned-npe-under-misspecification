@@ -17,8 +17,6 @@ EPS = 1e-8
 # Paper uses: θ2 ~ U(0.7,1), θ3 ~ U(0.01,1), θ4 ~ U(1,2)
 # -----------------------------
 
-# TODO: WIDE PRIOR?
-
 
 def prior_sample(key: Array) -> jnp.ndarray:
     lo, hi = theta_bounds_3d()
@@ -35,7 +33,6 @@ def wide_prior_sample(key: Array) -> jnp.ndarray:
 
 
 def theta_bounds_3d() -> tuple[jnp.ndarray, jnp.ndarray]:
-    # TODO: experiment
     # lo = jnp.array([-1.0, 0.01, 1.0], dtype=jnp.float32)
     # hi = jnp.array([1.0, 1.0, 2.0], dtype=jnp.float32)
     lo = jnp.array((-3.0, -3.0, -3.0), dtype=jnp.float32)

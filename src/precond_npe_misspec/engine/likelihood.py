@@ -34,10 +34,7 @@ def fit_likelihood_flow(
     S_train: jnp.ndarray,
     flow_cfg: Any,
 ) -> LikelihoodFit:
-    """Train a conditional flow q(s | θ) for NLE.
-
-    TODO: implement likelihood training, return a populated ``LikelihoodFit``.
-    """
+    """Train a conditional flow q(s | θ) for NLE."""
     raise NotImplementedError("fit_likelihood_flow is a placeholder; implement NLE training.")
 
 

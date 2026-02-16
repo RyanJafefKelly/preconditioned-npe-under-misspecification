@@ -33,7 +33,9 @@ def prior_logpdf(theta: jnp.ndarray, pairs: Array | None = None) -> jnp.ndarray:
     return jnp.where(in_box, 0.0, -jnp.inf)
 
 
-def _theta_to_X(theta: jnp.ndarray, k: int, pairs: Array) -> tuple[jnp.ndarray, jnp.ndarray]:
+def _theta_to_X(
+    theta: jnp.ndarray, k: int, pairs: Array
+) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Map theta -> (X, sigma). sigma is a JAX scalar."""
     m = pairs.shape[0]
     dtype = theta.dtype
@@ -72,7 +74,6 @@ def assumed_dgp(
     return jnp.vstack([y0[None, :], ys])
 
 
-# TODO! SOME MORE THOUGHT ON HOW TO MISSPECIFY
 def true_dgp(
     key: Array,
     theta: jnp.ndarray,
@@ -93,7 +94,7 @@ def true_dgp(
     # contam = jax.random.bernoulli(k_mask, eps, (T,))  # (T,)
     # e_t = kappa * sigma * _student_t_noise(k_eps, df, (T, 1))  # shared across channels
 
-    # misspecify mean. # TODO: more interesting misspecification?
+    # misspecify mean. # NOTE: more interesting misspecification?
     return Y + mu
 
 

@@ -145,9 +145,6 @@ def run_smc_abc(
         print(
             f"[smc] t={t} eps={state.epsilon:.6g} acc={info.acceptance_rate:.3f} R={int(state.R)}"
         )
-
-        # print("state.epsilon:", state.epsilon)
-        # print("info.acceptance_rate:", info.acceptance_rate)
         if (t >= MIN_ITERS) and default_stopping(
             state, info, eps_min=eps_min, acc_min=acc_min
         ):

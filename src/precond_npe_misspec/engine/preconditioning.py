@@ -96,9 +96,6 @@ def _make_dataset(
 
     thetas, S, xs = _filter_valid(thetas, S, xs)
 
-    print(f"jnp.max(S)={jnp.max(S)}, jnp.min(S)={jnp.min(S)}")
-    print(f"Is nan: {jnp.sum(jnp.isnan(thetas))}")
-
     return thetas, S, xs
 
 
@@ -281,7 +278,6 @@ def run_preconditioning(
 
     if method == "rf_abc":
         key, k_data = jax.random.split(key)
-        print("batch_size", batch_size)
         store_raw = store_raw_requested or needs_raw_global
         theta_all, S_all, X_all = _make_dataset(
             spec,
@@ -291,12 +287,6 @@ def run_preconditioning(
             sim_kwargs=sim_kwargs,
             store_raw_data=store_raw,
         )
-        print("made dataset")
-        # Train forests and get weights
-        # S_mean = S_all.mean(axis=0)
-        # S_std = S_all.std(axis=0)
-        # S_all_w = (S_all - S_mean) / (S_std + 1e-8)
-        # s_obs_w = (s_obs - S_mean) / (S_std + 1e-8)
         theta_all, S_all, diag = abc_rf_select(
             S=S_all, theta=theta_all, s_obs=s_obs, cfg=run.precond
         )
@@ -320,46 +310,7 @@ def run_preconditioning(
         # # gather selected triples
         theta_sel = theta_all[idx]
         S_sel = S_all[idx]
-        X_sel = X_all[idx] if X_all is not None else None  # unused by RNPE
-        print("median theta", jnp.median(theta_sel, axis=0))
-        print("Sel std", jnp.std(S_sel, axis=0))
-
-        # theta_lo_raw = getattr(spec, "theta_lo", None)
-        # theta_hi_raw = getattr(spec, "theta_hi", None)
-        # theta_lo = jnp.asarray(theta_lo_raw, dtype=theta_sel.dtype) if theta_lo_raw is not None else None
-        # theta_hi = jnp.asarray(theta_hi_raw, dtype=theta_sel.dtype) if theta_hi_raw is not None else None
-        # # Identify all but the first occurrence for each duplicated θ row.
-        # theta_sel_np = np.asarray(theta_sel)
-        # _, inverse, counts = np.unique(theta_sel_np, axis=0, return_inverse=True, return_counts=True)
-        # dup_indices: list[int] = []
-        # for label, count in enumerate(counts):
-        #     if count > 1:
-        #         dup_group = np.nonzero(inverse == label)[0]
-        #         dup_indices.extend(dup_group[1:].tolist())
-        # if dup_indices:
-        #     dup_idx_arr = jnp.asarray(dup_indices, dtype=jnp.int32)
-        #     key, k_jitter = jax.random.split(key)
-        #     th_std = jnp.std(theta_sel, axis=0)
-        #     th_scale = jnp.where(th_std > 0, th_std, jnp.ones_like(th_std))
-        #     if theta_lo is not None and theta_hi is not None:
-        #         range_scale = jnp.maximum(theta_hi - theta_lo, 1e-6)
-        #         th_scale = jnp.minimum(th_scale, range_scale)
-        #     jitter_scale = 1e-2 * th_scale
-        #     jitter_noise = jax.random.normal(k_jitter, theta_sel[dup_idx_arr].shape, dtype=theta_sel.dtype)
-        #     theta_sel = theta_sel.at[dup_idx_arr].add(jitter_noise * jitter_scale)
-        #     if theta_lo is not None and theta_hi is not None:
-        #         theta_sel = jnp.clip(theta_sel, theta_lo, theta_hi)
-        #     print(f"rf_abc: jittered {len(dup_indices)} duplicate θ samples")
-        # else:
-        #     print("rf_abc: no duplicate θ samples to jitter")
-        # print("median theta", jnp.median(theta_sel, axis=0))
-        # # Re-simulate so S reflects any jittered θ draws.
-        # key, k_resim = jax.random.split(key)
-        # sim_keys = jax.random.split(k_resim, theta_sel.shape[0])
-        # X_sel = jax.vmap(lambda kk, th: spec.simulate(kk, th, **sim_kwargs))(sim_keys, theta_sel)
-        # S_sel = jax.vmap(spec.summaries)(X_sel)
-        # Apply the same validity filtering after re-simulation
-        # theta_sel, S_sel, X_sel = _filter_valid(theta_sel, S_sel, X_sel)
+        X_sel = X_all[idx] if X_all is not None else None
 
         ESS = float(1.0 / (w**2).sum())
         uniq = int(np.unique(idx).size)
